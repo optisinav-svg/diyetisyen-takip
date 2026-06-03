@@ -1,0 +1,1 @@
+ALTER TABLE `meals` ADD `customMealType` varchar(100);
