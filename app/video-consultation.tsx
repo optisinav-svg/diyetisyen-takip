@@ -1,491 +1,431 @@
-import { useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-  FlatList,
-  Platform,
-} from "react-native";
+import { BackButton } from "@/components/back-button";
+import { ScrollView, Text, View, TouchableOpacity, TextInput, Alert, Modal, Switch } from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
-import { NavigationHeader } from "@/components/navigation-header";
 import { useColors } from "@/hooks/use-colors";
-import { telehealthService, VideoSession, ConsultationChat } from "@/lib/_core/telehealth-service";
+import { useState, useEffect } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getUserRegistration } from "@/lib/_core/user-registration";
+
+const SESSIONS_KEY = "video_sessions";
+const SEMINARS_KEY = "video_seminars";
+
+interface VideoSession {
+  id: string;
+  clientId: string;
+  clientName: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  duration: number;
+  status: "scheduled" | "completed" | "cancelled";
+  notes: string;
+  type: "individual" | "seminar";
+  title: string;
+}
+
+const SAMPLE_CLIENTS = [
+  { id: "c1", name: "Ayşe Yılmaz" },
+  { id: "c2", name: "Mehmet Demir" },
+  { id: "c3", name: "Fatma Kaya" },
+  { id: "c4", name: "Ali Öztürk" },
+];
+
+const SEMINAR_TOPICS = [
+  "Sağlıklı Beslenme Temelleri",
+  "Diyabet ve Beslenme",
+  "Sporcular İçin Beslenme",
+  "Kilo Yönetimi Stratejileri",
+  "Çocuk Beslenmesi",
+  "Menopoz ve Beslenme",
+  "Bağışıklık Sistemi ve Beslenme",
+];
+
+const MONTHS = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+
+function displayDate(s: string) {
+  const d = new Date(s);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
 
 export default function VideoConsultationScreen() {
   const colors = useColors();
+  const [role, setRole] = useState<"dietitian" | "client">("client");
+  const [userName, setUserName] = useState("");
   const [sessions, setSessions] = useState<VideoSession[]>([]);
-  const [selectedSession, setSelectedSession] = useState<VideoSession | null>(null);
-  const [chats, setChats] = useState<ConsultationChat[]>([]);
-  const [chatMessage, setChatMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"sessions" | "active" | "history">("sessions");
+  const [activeTab, setActiveTab] = useState<"sessions" | "seminar">("sessions");
+  const [showCreateSession, setShowCreateSession] = useState(false);
+  const [showCreateSeminar, setShowCreateSeminar] = useState(false);
 
-  useEffect(() => {
-    loadSessions();
-  }, []);
+  // Session form
+  const [selectedClient, setSelectedClient] = useState(SAMPLE_CLIENTS[0]);
+  const [sessionDate, setSessionDate] = useState("");
+  const [sessionTime, setSessionTime] = useState("10:00");
+  const [sessionDuration, setSessionDuration] = useState("30");
+  const [sessionNotes, setSessionNotes] = useState("");
 
-  useEffect(() => {
-    if (selectedSession) {
-      loadChats();
-    }
-  }, [selectedSession]);
+  // Seminar form
+  const [seminarTitle, setSeminarTitle] = useState("");
+  const [seminarDate, setSeminarDate] = useState("");
+  const [seminarTime, setSeminarTime] = useState("19:00");
+  const [seminarParticipants, setSeminarParticipants] = useState<string[]>([]);
 
-  const loadSessions = async () => {
-    setIsLoading(true);
-    try {
-      // Mock veri - gerçek uygulamada kullanıcı ID'si kullanılır
-      const mockSessions: VideoSession[] = [
-        {
-          id: "session-1",
-          appointmentId: "apt-1",
-          dietitianId: "diet-1",
-          dietitianName: "Dr. Mehmet Kaya",
-          clientId: "client-1",
-          clientName: "Ayşe Yılmaz",
-          title: "Beslenme Danışmanlığı",
-          description: "Haftalık beslenme planı gözden geçirmesi",
-          scheduledTime: Date.now() + 3600000,
-          duration: 30,
-          status: "scheduled",
-          channelName: "consultation-session-1",
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
-        {
-          id: "session-2",
-          appointmentId: "apt-2",
-          dietitianId: "diet-1",
-          dietitianName: "Dr. Mehmet Kaya",
-          clientId: "client-1",
-          clientName: "Ayşe Yılmaz",
-          title: "Kilo Kaybı Danışmanlığı",
-          description: "Aylık ilerleme değerlendirmesi",
-          scheduledTime: Date.now() - 86400000,
-          startTime: Date.now() - 86400000,
-          endTime: Date.now() - 84600000,
-          duration: 30,
-          status: "completed",
-          channelName: "consultation-session-2",
-          recordingUrl: "https://example.com/recording-session-2.mp4",
-          notes: "İyi ilerleme. Egzersiz programını devam ettir.",
-          createdAt: Date.now() - 86400000,
-          updatedAt: Date.now() - 84600000,
-        },
-      ];
-      setSessions(mockSessions);
-    } catch (error) {
-      console.error("Oturumlar yüklenemedi:", error);
-    } finally {
-      setIsLoading(false);
-    }
+  useEffect(() => { loadData(); }, []);
+
+  const loadData = async () => {
+    const user = await getUserRegistration();
+    setRole(user?.role ?? "client");
+    setUserName(user?.name ?? "");
+    const saved = await AsyncStorage.getItem(SESSIONS_KEY);
+    if (saved) setSessions(JSON.parse(saved));
   };
 
-  const loadChats = async () => {
-    if (!selectedSession) return;
-    try {
-      const mockChats: ConsultationChat[] = [
-        {
-          id: "chat-1",
-          sessionId: selectedSession.id,
-          senderId: "diet-1",
-          senderName: "Dr. Mehmet Kaya",
-          senderRole: "dietitian",
-          message: "Merhaba Ayşe, bugünkü danışmanlık oturumuna hoş geldiniz.",
-          timestamp: Date.now() - 600000,
-          isRead: true,
-        },
-        {
-          id: "chat-2",
-          sessionId: selectedSession.id,
-          senderId: "client-1",
-          senderName: "Ayşe Yılmaz",
-          senderRole: "client",
-          message: "Merhaba Doktor. Teşekkür ederim. Hazırım.",
-          timestamp: Date.now() - 500000,
-          isRead: true,
-        },
-      ];
-      setChats(mockChats);
-    } catch (error) {
-      console.error("Sohbet yüklenemedi:", error);
-    }
+  const saveSessions = async (list: VideoSession[]) => {
+    setSessions(list);
+    await AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(list));
   };
 
-  const handleSendMessage = async () => {
-    if (!chatMessage.trim() || !selectedSession) return;
-
-    try {
-      const newChat = await telehealthService.sendChatMessage(
-        selectedSession.id,
-        "client-1",
-        "Ayşe Yılmaz",
-        "client",
-        chatMessage
-      );
-
-      setChats([...chats, newChat]);
-      setChatMessage("");
-    } catch (error) {
-      console.error("Mesaj gönderilemedi:", error);
-    }
+  const createSession = async () => {
+    if (!sessionDate || !sessionTime) { Alert.alert("Hata", "Tarih ve saat girin"); return; }
+    const session: VideoSession = {
+      id: Date.now().toString(),
+      clientId: selectedClient.id,
+      clientName: selectedClient.name,
+      scheduledDate: sessionDate,
+      scheduledTime: sessionTime,
+      duration: Number(sessionDuration),
+      status: "scheduled",
+      notes: sessionNotes,
+      type: "individual",
+      title: `${selectedClient.name} ile Görüşme`,
+    };
+    await saveSessions([...sessions, session]);
+    setShowCreateSession(false);
+    setSessionNotes(""); setSessionDate("");
+    Alert.alert("✅ Oluşturuldu", `${selectedClient.name} ile video görüşme planlandı.\n${displayDate(sessionDate)} ${sessionTime}`);
   };
 
-  const handleStartSession = async (session: VideoSession) => {
-    try {
-      const updated = await telehealthService.startVideoSession(session.id);
-      if (updated) {
-        setSelectedSession(updated);
-        setSessions(sessions.map((s) => (s.id === session.id ? updated : s)));
-      }
-    } catch (error) {
-      console.error("Oturum başlatılamadı:", error);
-    }
+  const createSeminar = async () => {
+    if (!seminarTitle.trim() || !seminarDate) { Alert.alert("Hata", "Başlık ve tarih girin"); return; }
+    const allClients = seminarParticipants.length === 0
+      ? SAMPLE_CLIENTS.map(c => c.id)
+      : seminarParticipants;
+
+    const seminar: VideoSession = {
+      id: Date.now().toString(),
+      clientId: "all",
+      clientName: allClients.map(id => SAMPLE_CLIENTS.find(c => c.id === id)?.name ?? "").join(", "),
+      scheduledDate: seminarDate,
+      scheduledTime: seminarTime,
+      duration: 60,
+      status: "scheduled",
+      notes: "",
+      type: "seminar",
+      title: seminarTitle,
+    };
+    await saveSessions([...sessions, seminar]);
+    setShowCreateSeminar(false);
+    setSeminarTitle(""); setSeminarDate(""); setSeminarParticipants([]);
+    Alert.alert("✅ Seminer Oluşturuldu", `"${seminarTitle}" semineri planlandı.\n${displayDate(seminarDate)} ${seminarTime}\n${allClients.length} katılımcıya bildirim gönderildi.`);
   };
 
-  const handleEndSession = async () => {
-    if (!selectedSession) return;
-    try {
-      const updated = await telehealthService.endVideoSession(
-        selectedSession.id,
-        "Danışmanlık tamamlandı.",
-        "https://example.com/recording.mp4"
-      );
-      if (updated) {
-        setSelectedSession(updated);
-        setSessions(sessions.map((s) => (s.id === selectedSession.id ? updated : s)));
-      }
-    } catch (error) {
-      console.error("Oturum sonlandırılamadı:", error);
-    }
+  const cancelSession = (id: string) => {
+    Alert.alert("İptal", "Bu oturumu iptal etmek istiyor musunuz?", [
+      { text: "Hayır", style: "cancel" },
+      { text: "İptal Et", style: "destructive", onPress: () =>
+        saveSessions(sessions.map(s => s.id === id ? { ...s, status: "cancelled" as const } : s))
+      },
+    ]);
   };
 
-  const renderSessionCard = (session: VideoSession) => (
-    <TouchableOpacity
-      key={session.id}
-      onPress={() => setSelectedSession(session)}
-      style={{
-        backgroundColor: colors.surface,
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 12,
-        borderLeftWidth: 4,
-        borderLeftColor:
-          session.status === "active"
-            ? colors.success
-            : session.status === "completed"
-              ? colors.primary
-              : colors.border,
-      }}
-    >
-      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "600" }}>
-            {session.title}
-          </Text>
-          <Text style={{ color: colors.muted, fontSize: 14, marginTop: 4 }}>
-            {session.dietitianName}
-          </Text>
-          <Text style={{ color: colors.muted, fontSize: 12, marginTop: 4 }}>
-            {new Date(session.scheduledTime).toLocaleString("tr-TR")}
-          </Text>
-        </View>
-        <View
-          style={{
-            paddingHorizontal: 12,
-            paddingVertical: 6,
-            borderRadius: 20,
-            backgroundColor:
-              session.status === "active"
-                ? colors.success
-                : session.status === "completed"
-                  ? colors.primary
-                  : colors.border,
-          }}
-        >
-          <Text
-            style={{
-              color: session.status === "scheduled" ? colors.foreground : "#fff",
-              fontSize: 12,
-              fontWeight: "600",
-            }}
-          >
-            {session.status === "active"
-              ? "Aktif"
-              : session.status === "completed"
-                ? "Tamamlandı"
-                : "Planlandı"}
-          </Text>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-
-  const renderChatMessage = (chat: ConsultationChat) => (
-    <View
-      key={chat.id}
-      style={{
-        marginBottom: 12,
-        flexDirection: chat.senderRole === "client" ? "row-reverse" : "row",
-      }}
-    >
-      <View
-        style={{
-          backgroundColor:
-            chat.senderRole === "client" ? colors.primary : colors.surface,
-          borderRadius: 12,
-          padding: 12,
-          maxWidth: "80%",
-        }}
-      >
-        <Text
-          style={{
-            color:
-              chat.senderRole === "client"
-                ? "#fff"
-                : colors.foreground,
-            fontSize: 14,
-          }}
-        >
-          {chat.message}
-        </Text>
-        <Text
-          style={{
-            color:
-              chat.senderRole === "client"
-                ? "rgba(255,255,255,0.7)"
-                : colors.muted,
-            fontSize: 12,
-            marginTop: 4,
-          }}
-        >
-          {new Date(chat.timestamp).toLocaleTimeString("tr-TR", {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </Text>
-      </View>
-    </View>
-  );
-
-  if (isLoading) {
-    return (
-      <ScreenContainer>
-        <NavigationHeader title="Video Konsültasyon" />
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-          <Text style={{ color: colors.muted }}>Yükleniyor...</Text>
-        </View>
-      </ScreenContainer>
+  const startSession = (session: VideoSession) => {
+    Alert.alert(
+      "📹 Video Görüşme",
+      `${session.title} başlatılıyor...\n\nNot: Gerçek video görüşme için Zoom, Google Meet veya benzeri bir uygulama entegrasyonu gereklidir.`,
+      [
+        { text: "İptal", style: "cancel" },
+        { text: "Başlat", onPress: () => Alert.alert("Bağlanılıyor...", "Video görüşme başlatılıyor.") },
+      ]
     );
-  }
+  };
 
-  if (selectedSession) {
-    return (
-      <ScreenContainer>
-        <NavigationHeader title={selectedSession.title} onBack={() => setSelectedSession(null)} />
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
-          {/* Video Alanı */}
-          <View
-            style={{
-              backgroundColor: colors.border,
-              borderRadius: 12,
-              height: 300,
-              justifyContent: "center",
-              alignItems: "center",
-              marginBottom: 16,
-            }}
-          >
-            <Text style={{ color: colors.muted, fontSize: 16 }}>
-              {selectedSession.status === "active"
-                ? "📹 Video Akışı Burada Görüntülenecek"
-                : "Video konsültasyon başlamadı"}
-            </Text>
-          </View>
+  const mySessionsForClient = sessions.filter(s => s.type === "individual" && s.clientName.includes("Ayşe"));
+  const mySeminars = sessions.filter(s => s.type === "seminar");
+  const individualSessions = sessions.filter(s => s.type === "individual");
 
-          {/* Konsültasyon Bilgileri */}
-          <View
-            style={{
-              backgroundColor: colors.surface,
-              borderRadius: 12,
-              padding: 16,
-              marginBottom: 16,
-            }}
-          >
-            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>
-              Danışman: {selectedSession.dietitianName}
-            </Text>
-            <Text style={{ color: colors.muted, fontSize: 14, marginTop: 8 }}>
-              Süre: {selectedSession.duration} dakika
-            </Text>
-            {selectedSession.notes && (
-              <Text style={{ color: colors.muted, fontSize: 14, marginTop: 8 }}>
-                Notlar: {selectedSession.notes}
-              </Text>
-            )}
-          </View>
-
-          {/* Sohbet */}
-          <View style={{ marginBottom: 16 }}>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600", marginBottom: 12 }}>
-              Sohbet
-            </Text>
-            <FlatList
-              data={chats}
-              renderItem={({ item }) => renderChatMessage(item)}
-              keyExtractor={(item) => item.id}
-              scrollEnabled={false}
-              style={{
-                backgroundColor: colors.surface,
-                borderRadius: 12,
-                padding: 12,
-                minHeight: 200,
-              }}
-            />
-          </View>
-
-          {/* Mesaj Gönderme */}
-          {selectedSession.status === "active" && (
-            <View
-              style={{
-                flexDirection: "row",
-                gap: 8,
-                marginBottom: 16,
-              }}
-            >
-              <TextInput
-                value={chatMessage}
-                onChangeText={setChatMessage}
-                placeholder="Mesaj yazın..."
-                placeholderTextColor={colors.muted}
-                style={{
-                  flex: 1,
-                  backgroundColor: colors.surface,
-                  borderRadius: 12,
-                  paddingHorizontal: 12,
-                  paddingVertical: 10,
-                  color: colors.foreground,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                }}
-              />
-              <TouchableOpacity
-                onPress={handleSendMessage}
-                style={{
-                  backgroundColor: colors.primary,
-                  borderRadius: 12,
-                  paddingHorizontal: 16,
-                  justifyContent: "center",
-                }}
-              >
-                <Text style={{ color: "#fff", fontWeight: "600" }}>Gönder</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Kontrol Butonları */}
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            {selectedSession.status === "scheduled" && (
-              <TouchableOpacity
-                onPress={() => handleStartSession(selectedSession)}
-                style={{
-                  flex: 1,
-                  backgroundColor: colors.success,
-                  borderRadius: 12,
-                  paddingVertical: 12,
-                  alignItems: "center",
-                }}
-              >
-                <Text style={{ color: "#fff", fontWeight: "600" }}>Başlat</Text>
-              </TouchableOpacity>
-            )}
-            {selectedSession.status === "active" && (
-              <TouchableOpacity
-                onPress={handleEndSession}
-                style={{
-                  flex: 1,
-                  backgroundColor: colors.error,
-                  borderRadius: 12,
-                  paddingVertical: 12,
-                  alignItems: "center",
-                }}
-              >
-                <Text style={{ color: "#fff", fontWeight: "600" }}>Bitir</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </ScrollView>
-      </ScreenContainer>
-    );
-  }
+  const statusColor = (s: string) => s === "scheduled" ? colors.primary : s === "completed" ? "#22c55e" : "#ef4444";
+  const statusLabel = (s: string) => s === "scheduled" ? "📅 Planlandı" : s === "completed" ? "✅ Tamamlandı" : "❌ İptal";
 
   return (
     <ScreenContainer>
-      <NavigationHeader title="Video Konsültasyon" />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
-        {/* Tab Seçimi */}
-        <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
-          {["sessions", "active", "history"].map((tab) => (
-            <TouchableOpacity
-              key={tab}
-              onPress={() => setActiveTab(tab as typeof activeTab)}
-              style={{
-                flex: 1,
-                paddingVertical: 10,
-                paddingHorizontal: 12,
-                borderRadius: 8,
-                backgroundColor:
-                  activeTab === tab ? colors.primary : colors.surface,
-              }}
-            >
-              <Text
-                style={{
-                  color: activeTab === tab ? "#fff" : colors.foreground,
-                  fontWeight: "600",
-                  textAlign: "center",
-                  fontSize: 12,
-                }}
-              >
-                {tab === "sessions"
-                  ? "Planlandı"
-                  : tab === "active"
-                    ? "Aktif"
-                    : "Geçmiş"}
-              </Text>
-            </TouchableOpacity>
-          ))}
+      <BackButton title="📹 Video Danışma" />
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 32 }}>
+
+        {/* Tabs */}
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <TouchableOpacity onPress={() => setActiveTab("sessions")}
+            style={{
+              flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center",
+              backgroundColor: activeTab === "sessions" ? colors.primary : colors.surface,
+              borderWidth: 1, borderColor: activeTab === "sessions" ? colors.primary : colors.border,
+            }}>
+            <Text style={{ color: activeTab === "sessions" ? "#fff" : colors.foreground, fontWeight: "600" }}>
+              📹 Bireysel
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setActiveTab("seminar")}
+            style={{
+              flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center",
+              backgroundColor: activeTab === "seminar" ? colors.primary : colors.surface,
+              borderWidth: 1, borderColor: activeTab === "seminar" ? colors.primary : colors.border,
+            }}>
+            <Text style={{ color: activeTab === "seminar" ? "#fff" : colors.foreground, fontWeight: "600" }}>
+              🎤 Seminer
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Oturumlar Listesi */}
-        {activeTab === "sessions" &&
-          sessions
-            .filter((s) => s.status === "scheduled")
-            .map((session) => renderSessionCard(session))}
+        {/* BİREYSEL GÖRÜŞMELER */}
+        {activeTab === "sessions" && (
+          <>
+            {role === "dietitian" && (
+              <>
+                <TouchableOpacity onPress={() => setShowCreateSession(!showCreateSession)}
+                  style={{ paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: colors.primary }}>
+                  <Text style={{ color: "#fff", fontWeight: "700" }}>
+                    {showCreateSession ? "✕ İptal" : "+ Görüşme Planla"}
+                  </Text>
+                </TouchableOpacity>
 
-        {activeTab === "active" &&
-          sessions
-            .filter((s) => s.status === "active")
-            .map((session) => renderSessionCard(session))}
+                {showCreateSession && (
+                  <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, gap: 12, borderWidth: 1, borderColor: colors.border }}>
+                    <Text style={{ fontWeight: "700", color: colors.foreground }}>📹 Görüşme Oluştur</Text>
 
-        {activeTab === "history" &&
-          sessions
-            .filter((s) => s.status === "completed")
-            .map((session) => renderSessionCard(session))}
+                    {/* Danışan Seçimi */}
+                    <Text style={{ fontWeight: "600", color: colors.foreground }}>Danışan</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <View style={{ flexDirection: "row", gap: 8 }}>
+                        {SAMPLE_CLIENTS.map(c => (
+                          <TouchableOpacity key={c.id} onPress={() => setSelectedClient(c)}
+                            style={{
+                              paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                              backgroundColor: selectedClient.id === c.id ? colors.primary : colors.surface,
+                              borderWidth: 1, borderColor: selectedClient.id === c.id ? colors.primary : colors.border,
+                            }}>
+                            <Text style={{ color: selectedClient.id === c.id ? "#fff" : colors.foreground, fontWeight: "600" }}>
+                              {c.name}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </ScrollView>
 
-        {sessions.filter((s) => {
-          if (activeTab === "sessions") return s.status === "scheduled";
-          if (activeTab === "active") return s.status === "active";
-          return s.status === "completed";
-        }).length === 0 && (
-          <View style={{ alignItems: "center", paddingVertical: 32 }}>
-            <Text style={{ color: colors.muted, fontSize: 14 }}>
-              {activeTab === "sessions"
-                ? "Planlanmış konsültasyon yok"
-                : activeTab === "active"
-                  ? "Aktif konsültasyon yok"
-                  : "Geçmiş konsültasyon yok"}
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      <View style={{ flex: 2, gap: 4 }}>
+                        <Text style={{ fontWeight: "600", color: colors.foreground }}>Tarih</Text>
+                        <TextInput value={sessionDate} onChangeText={setSessionDate}
+                          placeholder="2026-06-20" placeholderTextColor={colors.muted}
+                          style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.background }} />
+                      </View>
+                      <View style={{ flex: 1, gap: 4 }}>
+                        <Text style={{ fontWeight: "600", color: colors.foreground }}>Saat</Text>
+                        <TextInput value={sessionTime} onChangeText={setSessionTime}
+                          placeholder="10:00" placeholderTextColor={colors.muted}
+                          style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.background }} />
+                      </View>
+                      <View style={{ flex: 1, gap: 4 }}>
+                        <Text style={{ fontWeight: "600", color: colors.foreground }}>Süre (dk)</Text>
+                        <TextInput value={sessionDuration} onChangeText={setSessionDuration}
+                          keyboardType="numeric" placeholderTextColor={colors.muted}
+                          style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.background }} />
+                      </View>
+                    </View>
+
+                    <TextInput value={sessionNotes} onChangeText={setSessionNotes}
+                      placeholder="Görüşme notu (isteğe bağlı)" multiline placeholderTextColor={colors.muted}
+                      style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.background, minHeight: 60 }} />
+
+                    <TouchableOpacity onPress={createSession}
+                      style={{ paddingVertical: 12, borderRadius: 10, alignItems: "center", backgroundColor: colors.primary }}>
+                      <Text style={{ color: "#fff", fontWeight: "700" }}>✅ Görüşme Oluştur</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* Danışan Listesi */}
+                <Text style={{ fontWeight: "700", color: colors.foreground }}>👥 Kayıtlı Danışanlar</Text>
+                {SAMPLE_CLIENTS.map(c => {
+                  const clientSessions = sessions.filter(s => s.clientId === c.id && s.type === "individual");
+                  return (
+                    <View key={c.id} style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border, flexDirection: "row", alignItems: "center", gap: 10 }}>
+                      <Text style={{ fontSize: 24 }}>👤</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontWeight: "700", color: colors.foreground }}>{c.name}</Text>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>
+                          {clientSessions.length} görüşme planlandı
+                        </Text>
+                      </View>
+                      <TouchableOpacity onPress={() => { setSelectedClient(c); setShowCreateSession(true); }}
+                        style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.primary + "20" }}>
+                        <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 12 }}>+ Planla</Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </>
+            )}
+
+            {/* Oturum Listesi */}
+            <Text style={{ fontWeight: "700", color: colors.foreground }}>
+              {role === "dietitian" ? "📋 Tüm Görüşmeler" : "📋 Görüşmelerim"}
             </Text>
-          </View>
+            {(role === "dietitian" ? individualSessions : mySessionsForClient).length === 0 ? (
+              <Text style={{ color: colors.muted, textAlign: "center" }}>Henüz görüşme planlanmadı.</Text>
+            ) : (role === "dietitian" ? individualSessions : mySessionsForClient)
+              .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))
+              .map(session => (
+              <View key={session.id} style={{
+                backgroundColor: colors.surface, borderRadius: 12, padding: 14, gap: 8,
+                borderWidth: 1, borderColor: colors.border,
+              }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                  <Text style={{ fontWeight: "700", color: colors.foreground }}>{session.title}</Text>
+                  <Text style={{ color: statusColor(session.status), fontSize: 12, fontWeight: "600" }}>
+                    {statusLabel(session.status)}
+                  </Text>
+                </View>
+                <Text style={{ color: colors.muted, fontSize: 13 }}>
+                  📅 {displayDate(session.scheduledDate)} 🕐 {session.scheduledTime} · {session.duration} dk
+                </Text>
+                {session.notes ? <Text style={{ color: colors.muted, fontSize: 12 }}>{session.notes}</Text> : null}
+                {session.status === "scheduled" && (
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <TouchableOpacity onPress={() => startSession(session)}
+                      style={{ flex: 2, paddingVertical: 10, borderRadius: 10, alignItems: "center", backgroundColor: colors.primary }}>
+                      <Text style={{ color: "#fff", fontWeight: "700" }}>📹 Başlat</Text>
+                    </TouchableOpacity>
+                    {role === "dietitian" && (
+                      <TouchableOpacity onPress={() => cancelSession(session.id)}
+                        style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center", backgroundColor: "#ef444420", borderWidth: 1, borderColor: "#ef4444" }}>
+                        <Text style={{ color: "#ef4444", fontWeight: "600" }}>İptal</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </View>
+            ))}
+          </>
+        )}
+
+        {/* SEMİNER */}
+        {activeTab === "seminar" && (
+          <>
+            {role === "dietitian" && (
+              <>
+                <TouchableOpacity onPress={() => setShowCreateSeminar(!showCreateSeminar)}
+                  style={{ paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: "#8b5cf6" }}>
+                  <Text style={{ color: "#fff", fontWeight: "700" }}>
+                    {showCreateSeminar ? "✕ İptal" : "🎤 Yeni Seminer / Bilgilendirme"}
+                  </Text>
+                </TouchableOpacity>
+
+                {showCreateSeminar && (
+                  <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, gap: 12, borderWidth: 1, borderColor: colors.border }}>
+                    <Text style={{ fontWeight: "700", color: colors.foreground }}>🎤 Seminer Oluştur</Text>
+
+                    {/* Konu Seçimi */}
+                    <Text style={{ fontWeight: "600", color: colors.foreground }}>Konu</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <View style={{ flexDirection: "row", gap: 8 }}>
+                        {SEMINAR_TOPICS.map(topic => (
+                          <TouchableOpacity key={topic} onPress={() => setSeminarTitle(topic)}
+                            style={{
+                              paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
+                              backgroundColor: seminarTitle === topic ? "#8b5cf6" : colors.surface,
+                              borderWidth: 1, borderColor: seminarTitle === topic ? "#8b5cf6" : colors.border,
+                            }}>
+                            <Text style={{ color: seminarTitle === topic ? "#fff" : colors.foreground, fontSize: 12, fontWeight: "600" }}>{topic}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </ScrollView>
+
+                    <TextInput value={seminarTitle} onChangeText={setSeminarTitle}
+                      placeholder="veya konu başlığı yazın..." placeholderTextColor={colors.muted}
+                      style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.background }} />
+
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      <View style={{ flex: 2, gap: 4 }}>
+                        <Text style={{ fontWeight: "600", color: colors.foreground }}>Tarih</Text>
+                        <TextInput value={seminarDate} onChangeText={setSeminarDate}
+                          placeholder="2026-06-25" placeholderTextColor={colors.muted}
+                          style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.background }} />
+                      </View>
+                      <View style={{ flex: 1, gap: 4 }}>
+                        <Text style={{ fontWeight: "600", color: colors.foreground }}>Saat</Text>
+                        <TextInput value={seminarTime} onChangeText={setSeminarTime}
+                          placeholder="19:00" placeholderTextColor={colors.muted}
+                          style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.background }} />
+                      </View>
+                    </View>
+
+                    {/* Katılımcı Seçimi */}
+                    <Text style={{ fontWeight: "600", color: colors.foreground }}>
+                      Katılımcılar ({seminarParticipants.length === 0 ? "Tüm danışanlar" : seminarParticipants.length + " kişi"})
+                    </Text>
+                    {SAMPLE_CLIENTS.map(c => (
+                      <TouchableOpacity key={c.id}
+                        onPress={() => setSeminarParticipants(prev =>
+                          prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]
+                        )}
+                        style={{
+                          flexDirection: "row", alignItems: "center", gap: 10,
+                          padding: 10, borderRadius: 10,
+                          backgroundColor: seminarParticipants.includes(c.id) ? "#8b5cf620" : colors.background,
+                          borderWidth: 1, borderColor: seminarParticipants.includes(c.id) ? "#8b5cf6" : colors.border,
+                        }}>
+                        <View style={{
+                          width: 20, height: 20, borderRadius: 10, borderWidth: 2,
+                          borderColor: seminarParticipants.includes(c.id) ? "#8b5cf6" : colors.border,
+                          backgroundColor: seminarParticipants.includes(c.id) ? "#8b5cf6" : "transparent",
+                          alignItems: "center", justifyContent: "center",
+                        }}>
+                          {seminarParticipants.includes(c.id) && <Text style={{ color: "#fff", fontSize: 11 }}>✓</Text>}
+                        </View>
+                        <Text style={{ color: colors.foreground }}>👤 {c.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+
+                    <TouchableOpacity onPress={createSeminar}
+                      style={{ paddingVertical: 12, borderRadius: 10, alignItems: "center", backgroundColor: "#8b5cf6" }}>
+                      <Text style={{ color: "#fff", fontWeight: "700" }}>🎤 Seminer Oluştur ve Davet Gönder</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </>
+            )}
+
+            {/* Seminer Listesi */}
+            <Text style={{ fontWeight: "700", color: colors.foreground }}>📋 Seminerler</Text>
+            {mySeminars.length === 0 ? (
+              <Text style={{ color: colors.muted, textAlign: "center" }}>Henüz seminer planlanmadı.</Text>
+            ) : mySeminars.map(seminar => (
+              <View key={seminar.id} style={{
+                backgroundColor: colors.surface, borderRadius: 12, padding: 14, gap: 8,
+                borderWidth: 1, borderColor: "#8b5cf6",
+              }}>
+                <Text style={{ fontWeight: "700", color: colors.foreground, fontSize: 15 }}>🎤 {seminar.title}</Text>
+                <Text style={{ color: colors.muted, fontSize: 13 }}>
+                  📅 {displayDate(seminar.scheduledDate)} 🕐 {seminar.scheduledTime} · 60 dk
+                </Text>
+                <Text style={{ color: "#8b5cf6", fontSize: 12 }}>👥 {seminar.clientName}</Text>
+                {seminar.status === "scheduled" && (
+                  <TouchableOpacity onPress={() => startSession(seminar)}
+                    style={{ paddingVertical: 10, borderRadius: 10, alignItems: "center", backgroundColor: "#8b5cf6" }}>
+                    <Text style={{ color: "#fff", fontWeight: "700" }}>📹 Semineri Başlat</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
+          </>
         )}
       </ScrollView>
     </ScreenContainer>

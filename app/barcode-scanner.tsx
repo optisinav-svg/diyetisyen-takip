@@ -3,7 +3,7 @@ import { ScrollView, Text, View, TouchableOpacity, Alert, ActivityIndicator } fr
 import { ScreenContainer } from "@/components/screen-container";
 import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/use-colors";
-import * as BarCodeScanner from "expo-barcode-scanner";
+
 import { barcodeScannerService, type FoodItem } from "@/lib/_core/barcode-scanner";
 
 interface ScannedItem {

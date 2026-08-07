@@ -1,493 +1,254 @@
-import { ScrollView, Text, View, TouchableOpacity, FlatList, Alert } from "react-native";
+import { BackButton } from "@/components/back-button";
+import { ScrollView, Text, View, TouchableOpacity, TextInput, Alert, Modal } from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
-import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/use-colors";
 import { useEffect, useState } from "react";
 import { getUserRegistration } from "@/lib/_core/user-registration";
-import {
-  getDietitianRecommendations,
-  getActivityAlerts,
-  markRecommendationAsRead,
-  deleteRecommendation,
-  type DietitianRecommendation,
-  type ActivityAlert,
-} from "@/lib/_core/dietitian-recommendations";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const RECS_KEY = "dietitian_recommendations";
+
+interface Recommendation {
+  id: string;
+  clientName: string;
+  type: "warning" | "suggestion" | "praise" | "alert";
+  title: string;
+  message: string;
+  priority: "low" | "medium" | "high";
+  createdAt: string;
+  read: boolean;
+}
+
+const SAMPLE_RECS: Recommendation[] = [
+  { id: "1", clientName: "Ayşe Yılmaz", type: "praise", title: "Harika İlerleme!", message: "Ayşe bu hafta su tüketimini %30 artırdı. Mükemmel gidişat!", priority: "low", createdAt: new Date().toISOString(), read: false },
+  { id: "2", clientName: "Mehmet Demir", type: "warning", title: "Düşük Aktivite", message: "Mehmet'in günlük adım sayısı hedefin altında. Spor aktivitesini artırması gerekiyor.", priority: "medium", createdAt: new Date(Date.now() - 3600000).toISOString(), read: false },
+  { id: "3", clientName: "Fatma Kaya", type: "suggestion", title: "Protein Artırımı", message: "Fatma'nın protein alımı hedefin altında. Günlük diyetine protein kaynakları eklenmeli.", priority: "high", createdAt: new Date(Date.now() - 7200000).toISOString(), read: true },
+];
+
+const TYPE_CONFIG = {
+  praise: { color: "#22c55e", bg: "#22c55e20", icon: "🏆", label: "Övgü" },
+  suggestion: { color: "#3b82f6", bg: "#3b82f620", icon: "💡", label: "Öneri" },
+  warning: { color: "#f97316", bg: "#f9731620", icon: "⚠️", label: "Uyarı" },
+  alert: { color: "#ef4444", bg: "#ef444420", icon: "🚨", label: "Alarm" },
+};
+
+const PRIORITY_CONFIG = {
+  low: { color: "#22c55e", label: "Düşük" },
+  medium: { color: "#f97316", label: "Orta" },
+  high: { color: "#ef4444", label: "Yüksek" },
+};
+
+const CLIENTS = ["Ayşe Yılmaz", "Mehmet Demir", "Fatma Kaya"];
 
 export default function DietitianRecommendationsScreen() {
-  const router = useRouter();
   const colors = useColors();
+  const [role, setRole] = useState<"dietitian" | "client">("client");
+  const [recs, setRecs] = useState<Recommendation[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newMessage, setNewMessage] = useState("");
+  const [newType, setNewType] = useState<Recommendation["type"]>("suggestion");
+  const [newPriority, setNewPriority] = useState<Recommendation["priority"]>("medium");
+  const [newClient, setNewClient] = useState(CLIENTS[0]);
 
-  const [user, setUser] = useState<any>(null);
-  const [recommendations, setRecommendations] = useState<DietitianRecommendation[]>([]);
-  const [activityAlerts, setActivityAlerts] = useState<ActivityAlert[]>([]);
-  const [activeTab, setActiveTab] = useState<"recommendations" | "alerts">("recommendations");
-  const [filterType, setFilterType] = useState<"all" | "unread" | "high">("all");
-
-  useEffect(() => {
-    loadData();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
-    try {
-      const userData = await getUserRegistration();
-      setUser(userData);
-
-      if (userData?.role === "dietitian") {
-        const recs = await getDietitianRecommendations(userData.email);
-        setRecommendations(recs);
-
-        const alerts = await getActivityAlerts(userData.email);
-        setActivityAlerts(alerts);
-      }
-    } catch (error) {
-      console.error("Failed to load data:", error);
+    const user = await getUserRegistration();
+    setRole(user?.role ?? "client");
+    const saved = await AsyncStorage.getItem(RECS_KEY);
+    if (saved) {
+      setRecs(JSON.parse(saved));
+    } else {
+      // İlk açılışta örnek veri yükle
+      setRecs(SAMPLE_RECS);
+      await AsyncStorage.setItem(RECS_KEY, JSON.stringify(SAMPLE_RECS));
     }
   };
 
-  const handleMarkAsRead = async (recommendationId: string) => {
-    try {
-      await markRecommendationAsRead(user.email, recommendationId);
-      loadData();
-    } catch (error) {
-      console.error("Failed to mark as read:", error);
-    }
+  const saveRecs = async (list: Recommendation[]) => {
+    setRecs(list);
+    await AsyncStorage.setItem(RECS_KEY, JSON.stringify(list));
   };
 
-  const handleDelete = async (recommendationId: string) => {
-    Alert.alert("Sil", "Bu öneriyi silmek istediğinize emin misiniz?", [
+  const addRec = async () => {
+    if (!newTitle.trim() || !newMessage.trim()) { Alert.alert("Hata", "Başlık ve mesaj girin"); return; }
+    const rec: Recommendation = {
+      id: Date.now().toString(),
+      clientName: newClient,
+      type: newType, title: newTitle, message: newMessage,
+      priority: newPriority,
+      createdAt: new Date().toISOString(),
+      read: false,
+    };
+    await saveRecs([rec, ...recs]);
+    setShowForm(false); setNewTitle(""); setNewMessage("");
+    Alert.alert("Gönderildi", `${newClient}'a öneri gönderildi.`);
+  };
+
+  const markRead = async (id: string) => {
+    await saveRecs(recs.map(r => r.id === id ? { ...r, read: true } : r));
+  };
+
+  const deleteRec = async (id: string) => {
+    Alert.alert("Sil", "Bu öneriyi silmek istiyor musunuz?", [
       { text: "İptal", style: "cancel" },
-      {
-        text: "Sil",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await deleteRecommendation(user.email, recommendationId);
-            loadData();
-          } catch (error) {
-            console.error("Failed to delete:", error);
-          }
-        },
-      },
+      { text: "Sil", style: "destructive", onPress: () => saveRecs(recs.filter(r => r.id !== id)) },
     ]);
   };
 
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case "praise":
-        return "#10B981";
-      case "suggestion":
-        return "#3B82F6";
-      case "warning":
-        return "#F59E0B";
-      case "alert":
-        return "#EF4444";
-      default:
-        return colors.primary;
-    }
-  };
-
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case "praise":
-        return "🎉";
-      case "suggestion":
-        return "💡";
-      case "warning":
-        return "⚠️";
-      case "alert":
-        return "🚨";
-      default:
-        return "📌";
-    }
-  };
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case "info":
-        return "#3B82F6";
-      case "warning":
-        return "#F59E0B";
-      case "critical":
-        return "#EF4444";
-      default:
-        return colors.primary;
-    }
-  };
-
-  const filteredRecommendations = recommendations.filter((rec) => {
-    if (filterType === "unread") return !rec.read;
-    if (filterType === "high") return rec.priority === "high";
-    return true;
-  });
-
-  if (!user || user.role !== "dietitian") {
-    return (
-      <ScreenContainer className="p-6">
-        <View className="flex-1 items-center justify-center">
-          <Text style={{ color: colors.foreground }}>Erişim reddedildi</Text>
-        </View>
-      </ScreenContainer>
-    );
-  }
+  const unreadCount = recs.filter(r => !r.read).length;
 
   return (
-    <ScreenContainer className="p-6">
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        <View className="gap-4">
-          {/* Header */}
-          <View className="flex-row items-center justify-between mb-2">
-            <Text className="text-3xl font-bold text-foreground">💡 Öneriler & Uyarılar</Text>
-            <TouchableOpacity
-              onPress={() => router.back()}
-              style={{
-                paddingVertical: 8,
-                paddingHorizontal: 12,
-                borderRadius: 6,
-                backgroundColor: colors.surface,
-                borderWidth: 1,
-                borderColor: colors.border,
-              }}
-            >
-              <Text style={{ color: colors.foreground, fontWeight: "600" }}>← Geri</Text>
-            </TouchableOpacity>
+    <ScreenContainer>
+      <BackButton title="💡 Diyetisyen Önerileri" />
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 32 }}>
+
+        {/* Özet */}
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <View style={{ flex: 1, backgroundColor: colors.surface, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: colors.border, alignItems: "center" }}>
+            <Text style={{ fontSize: 22, fontWeight: "bold", color: colors.primary }}>{recs.length}</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>Toplam</Text>
           </View>
-
-          {/* Tab Navigation */}
-          <View className="flex-row gap-2">
-            <TouchableOpacity
-              onPress={() => setActiveTab("recommendations")}
-              style={{
-                flex: 1,
-                paddingVertical: 10,
-                borderRadius: 8,
-                backgroundColor:
-                  activeTab === "recommendations" ? colors.primary : colors.surface,
-                borderWidth: 1,
-                borderColor:
-                  activeTab === "recommendations" ? colors.primary : colors.border,
-              }}
-            >
-              <Text
-                style={{
-                  color: activeTab === "recommendations" ? "#fff" : colors.foreground,
-                  textAlign: "center",
-                  fontWeight: "600",
-                  fontSize: 12,
-                }}
-              >
-                Öneriler ({recommendations.length})
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => setActiveTab("alerts")}
-              style={{
-                flex: 1,
-                paddingVertical: 10,
-                borderRadius: 8,
-                backgroundColor: activeTab === "alerts" ? colors.primary : colors.surface,
-                borderWidth: 1,
-                borderColor: activeTab === "alerts" ? colors.primary : colors.border,
-              }}
-            >
-              <Text
-                style={{
-                  color: activeTab === "alerts" ? "#fff" : colors.foreground,
-                  textAlign: "center",
-                  fontWeight: "600",
-                  fontSize: 12,
-                }}
-              >
-                Uyarılar ({activityAlerts.length})
-              </Text>
-            </TouchableOpacity>
+          <View style={{ flex: 1, backgroundColor: colors.surface, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: "#ef4444", alignItems: "center" }}>
+            <Text style={{ fontSize: 22, fontWeight: "bold", color: "#ef4444" }}>{unreadCount}</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>Okunmamış</Text>
           </View>
+          <View style={{ flex: 1, backgroundColor: colors.surface, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: "#22c55e", alignItems: "center" }}>
+            <Text style={{ fontSize: 22, fontWeight: "bold", color: "#22c55e" }}>{recs.length - unreadCount}</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>Okundu</Text>
+          </View>
+        </View>
 
-          {/* Recommendations Tab */}
-          {activeTab === "recommendations" && (
-            <>
-              {/* Filter Buttons */}
-              <View className="flex-row gap-2">
-                {(["all", "unread", "high"] as const).map((filter) => (
-                  <TouchableOpacity
-                    key={filter}
-                    onPress={() => setFilterType(filter)}
+        {/* Diyetisyen: yeni öneri ekle */}
+        {role === "dietitian" && (
+          <TouchableOpacity onPress={() => setShowForm(!showForm)}
+            style={{ paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: colors.primary }}>
+            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>+ Yeni Öneri Gönder</Text>
+          </TouchableOpacity>
+        )}
+
+        {showForm && role === "dietitian" && (
+          <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, gap: 12, borderWidth: 1, borderColor: colors.border }}>
+            {/* Danışan Seçimi */}
+            <Text style={{ fontWeight: "700", color: colors.foreground }}>Danışan</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {CLIENTS.map(c => (
+                  <TouchableOpacity key={c} onPress={() => setNewClient(c)}
                     style={{
-                      paddingVertical: 6,
-                      paddingHorizontal: 10,
-                      borderRadius: 6,
-                      backgroundColor:
-                        filterType === filter ? colors.primary : colors.surface,
-                      borderWidth: 1,
-                      borderColor: filterType === filter ? colors.primary : colors.border,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: filterType === filter ? "#fff" : colors.foreground,
-                        fontWeight: "600",
-                        fontSize: 10,
-                      }}
-                    >
-                      {filter === "all" ? "Tümü" : filter === "unread" ? "Okunmamış" : "Acil"}
-                    </Text>
+                      paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                      backgroundColor: newClient === c ? colors.primary : colors.surface,
+                      borderWidth: 1, borderColor: newClient === c ? colors.primary : colors.border,
+                    }}>
+                    <Text style={{ color: newClient === c ? "#fff" : colors.foreground, fontWeight: "600" }}>{c}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
+            </ScrollView>
 
-              {/* Recommendations List */}
-              {filteredRecommendations.length > 0 ? (
-                <View className="gap-3">
-                  {filteredRecommendations.map((rec) => (
-                    <View
-                      key={rec.id}
-                      style={{
-                        backgroundColor: colors.surface,
-                        borderRadius: 12,
-                        padding: 12,
-                        borderWidth: 1,
-                        borderColor: rec.read ? colors.border : getTypeColor(rec.type),
-                        opacity: rec.read ? 0.7 : 1,
-                      }}
-                    >
-                      {/* Header */}
-                      <View className="flex-row items-start justify-between mb-2">
-                        <View className="flex-row items-center gap-2 flex-1">
-                          <Text style={{ fontSize: 16 }}>{getTypeIcon(rec.type)}</Text>
-                          <View style={{ flex: 1 }}>
-                            <Text
-                              style={{
-                                fontSize: 12,
-                                fontWeight: "600",
-                                color: colors.foreground,
-                              }}
-                            >
-                              {rec.title}
-                            </Text>
-                            <Text style={{ fontSize: 10, color: colors.muted, marginTop: 2 }}>
-                              👤 {rec.clientName}
-                            </Text>
-                          </View>
-                        </View>
-                        <View
-                          style={{
-                            paddingVertical: 4,
-                            paddingHorizontal: 8,
-                            borderRadius: 4,
-                            backgroundColor: getTypeColor(rec.type),
-                          }}
-                        >
-                          <Text
-                            style={{
-                              fontSize: 9,
-                              color: "#fff",
-                              fontWeight: "600",
-                              textTransform: "uppercase",
-                            }}
-                          >
-                            {rec.priority === "high"
-                              ? "Acil"
-                              : rec.priority === "medium"
-                                ? "Orta"
-                                : "Düşük"}
-                          </Text>
-                        </View>
-                      </View>
+            {/* Tür */}
+            <Text style={{ fontWeight: "700", color: colors.foreground }}>Tür</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {(Object.entries(TYPE_CONFIG) as any[]).map(([key, val]) => (
+                <TouchableOpacity key={key} onPress={() => setNewType(key as any)}
+                  style={{
+                    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
+                    backgroundColor: newType === key ? val.color : colors.surface,
+                    borderWidth: 1, borderColor: val.color,
+                  }}>
+                  <Text style={{ color: newType === key ? "#fff" : val.color, fontWeight: "600", fontSize: 12 }}>
+                    {val.icon} {val.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
 
-                      {/* Message */}
-                      <Text style={{ fontSize: 11, color: colors.muted, marginBottom: 8 }}>
-                        {rec.message}
-                      </Text>
+            {/* Öncelik */}
+            <Text style={{ fontWeight: "700", color: colors.foreground }}>Öncelik</Text>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {(Object.entries(PRIORITY_CONFIG) as any[]).map(([key, val]) => (
+                <TouchableOpacity key={key} onPress={() => setNewPriority(key as any)}
+                  style={{
+                    flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: "center",
+                    backgroundColor: newPriority === key ? val.color : colors.surface,
+                    borderWidth: 1, borderColor: val.color,
+                  }}>
+                  <Text style={{ color: newPriority === key ? "#fff" : val.color, fontWeight: "600", fontSize: 12 }}>
+                    {val.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
 
-                      {/* Action Items */}
-                      {rec.actionItems && rec.actionItems.length > 0 && (
-                        <View className="gap-1 mb-3">
-                          {rec.actionItems.map((item, index) => (
-                            <Text
-                              key={index}
-                              style={{
-                                fontSize: 10,
-                                color: colors.muted,
-                                marginLeft: 12,
-                              }}
-                            >
-                              • {item}
-                            </Text>
-                          ))}
-                        </View>
-                      )}
+            <TextInput placeholder="Başlık" value={newTitle} onChangeText={setNewTitle}
+              placeholderTextColor={colors.muted}
+              style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.foreground, backgroundColor: colors.background }} />
+            <TextInput placeholder="Mesaj içeriği" value={newMessage} onChangeText={setNewMessage}
+              multiline placeholderTextColor={colors.muted}
+              style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.foreground, backgroundColor: colors.background, minHeight: 80 }} />
 
-                      {/* Footer */}
-                      <View className="flex-row items-center justify-between">
-                        <Text style={{ fontSize: 9, color: colors.muted }}>
-                          {new Date(rec.createdAt).toLocaleDateString("tr-TR")}
-                        </Text>
-                        <View className="flex-row gap-2">
-                          {!rec.read && (
-                            <TouchableOpacity
-                              onPress={() => handleMarkAsRead(rec.id)}
-                              style={{
-                                paddingVertical: 4,
-                                paddingHorizontal: 8,
-                                borderRadius: 4,
-                                backgroundColor: colors.primary,
-                              }}
-                            >
-                              <Text style={{ fontSize: 9, color: "#fff", fontWeight: "600" }}>
-                                ✓ Oku
-                              </Text>
-                            </TouchableOpacity>
-                          )}
-                          <TouchableOpacity
-                            onPress={() => handleDelete(rec.id)}
-                            style={{
-                              paddingVertical: 4,
-                              paddingHorizontal: 8,
-                              borderRadius: 4,
-                              backgroundColor: "#EF4444",
-                            }}
-                          >
-                            <Text style={{ fontSize: 9, color: "#fff", fontWeight: "600" }}>
-                              ✕
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    </View>
-                  ))}
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <TouchableOpacity onPress={() => setShowForm(false)}
+                style={{ flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: "center", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+                <Text style={{ color: colors.foreground }}>İptal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={addRec}
+                style={{ flex: 2, paddingVertical: 12, borderRadius: 10, alignItems: "center", backgroundColor: colors.primary }}>
+                <Text style={{ color: "#fff", fontWeight: "700" }}>Gönder</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Öneri Listesi */}
+        {recs.length === 0 ? (
+          <Text style={{ color: colors.muted, textAlign: "center", marginTop: 20 }}>Henüz öneri yok.</Text>
+        ) : recs.map(rec => {
+          const config = TYPE_CONFIG[rec.type];
+          const pConfig = PRIORITY_CONFIG[rec.priority];
+          return (
+            <View key={rec.id} style={{
+              backgroundColor: rec.read ? colors.surface : config.bg,
+              borderRadius: 12, padding: 16, gap: 8,
+              borderWidth: 2, borderColor: rec.read ? colors.border : config.color,
+            }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
+                    <Text style={{ fontSize: 16 }}>{config.icon}</Text>
+                    <Text style={{ fontWeight: "700", color: colors.foreground, fontSize: 15 }}>{rec.title}</Text>
+                    {!rec.read && <View style={{ backgroundColor: config.color, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                      <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>YENİ</Text>
+                    </View>}
+                  </View>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>
+                    👤 {rec.clientName} · <Text style={{ color: pConfig.color }}>{pConfig.label} öncelik</Text>
+                  </Text>
                 </View>
-              ) : (
-                <Text style={{ textAlign: "center", color: colors.muted, marginVertical: 20 }}>
-                  Henüz öneri yok
+                {role === "dietitian" && (
+                  <TouchableOpacity onPress={() => deleteRec(rec.id)}>
+                    <Text style={{ color: "#ef4444", fontSize: 13 }}>Sil</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <Text style={{ color: colors.foreground, fontSize: 14, lineHeight: 20 }}>{rec.message}</Text>
+
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={{ color: colors.muted, fontSize: 11 }}>
+                  {new Date(rec.createdAt).toLocaleDateString("tr-TR")} {new Date(rec.createdAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
                 </Text>
-              )}
-            </>
-          )}
-
-          {/* Alerts Tab */}
-          {activeTab === "alerts" && (
-            <>
-              {activityAlerts.length > 0 ? (
-                <View className="gap-3">
-                  {activityAlerts.map((alert, index) => (
-                    <View
-                      key={index}
-                      style={{
-                        backgroundColor: colors.surface,
-                        borderRadius: 12,
-                        padding: 12,
-                        borderWidth: 1,
-                        borderColor: getSeverityColor(alert.severity),
-                        borderLeftWidth: 4,
-                      }}
-                    >
-                      {/* Header */}
-                      <View className="flex-row items-center justify-between mb-2">
-                        <View className="flex-row items-center gap-2 flex-1">
-                          <Text style={{ fontSize: 16 }}>
-                            {alert.severity === "critical"
-                              ? "🚨"
-                              : alert.severity === "warning"
-                                ? "⚠️"
-                                : "ℹ️"}
-                          </Text>
-                          <View style={{ flex: 1 }}>
-                            <Text
-                              style={{
-                                fontSize: 12,
-                                fontWeight: "600",
-                                color: colors.foreground,
-                              }}
-                            >
-                              {alert.clientName}
-                            </Text>
-                            <Text style={{ fontSize: 10, color: colors.muted, marginTop: 2 }}>
-                              {alert.alertType
-                                .split("_")
-                                .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-                                .join(" ")}
-                            </Text>
-                          </View>
-                        </View>
-                        <View
-                          style={{
-                            paddingVertical: 4,
-                            paddingHorizontal: 8,
-                            borderRadius: 4,
-                            backgroundColor: getSeverityColor(alert.severity),
-                          }}
-                        >
-                          <Text
-                            style={{
-                              fontSize: 9,
-                              color: "#fff",
-                              fontWeight: "600",
-                              textTransform: "uppercase",
-                            }}
-                          >
-                            {alert.severity === "critical"
-                              ? "Acil"
-                              : alert.severity === "warning"
-                                ? "Uyarı"
-                                : "Bilgi"}
-                          </Text>
-                        </View>
-                      </View>
-
-                      {/* Message */}
-                      <Text style={{ fontSize: 11, color: colors.muted, marginBottom: 8 }}>
-                        {alert.message}
-                      </Text>
-
-                      {/* Suggested Actions */}
-                      {alert.suggestedActions.length > 0 && (
-                        <View className="gap-1">
-                          <Text
-                            style={{
-                              fontSize: 10,
-                              fontWeight: "600",
-                              color: colors.foreground,
-                              marginBottom: 4,
-                            }}
-                          >
-                            Önerilen İşlemler:
-                          </Text>
-                          {alert.suggestedActions.map((action, idx) => (
-                            <Text
-                              key={idx}
-                              style={{
-                                fontSize: 10,
-                                color: colors.muted,
-                                marginLeft: 12,
-                              }}
-                            >
-                              • {action}
-                            </Text>
-                          ))}
-                        </View>
-                      )}
-
-                      {/* Timestamp */}
-                      <Text
-                        style={{
-                          fontSize: 9,
-                          color: colors.muted,
-                          marginTop: 8,
-                        }}
-                      >
-                        {new Date(alert.timestamp).toLocaleDateString("tr-TR")}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <Text style={{ textAlign: "center", color: colors.muted, marginVertical: 20 }}>
-                  Henüz uyarı yok
-                </Text>
-              )}
-            </>
-          )}
-        </View>
+                {!rec.read && (
+                  <TouchableOpacity onPress={() => markRead(rec.id)}
+                    style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: config.color + "30" }}>
+                    <Text style={{ color: config.color, fontSize: 12, fontWeight: "600" }}>Okundu İşaretle</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          );
+        })}
       </ScrollView>
     </ScreenContainer>
   );

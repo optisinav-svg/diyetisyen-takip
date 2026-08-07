@@ -1,8 +1,11 @@
-import { ScrollView, Text, View, Pressable, Dimensions } from 'react-native';
+import { ScrollView, Text, View, TouchableOpacity, Dimensions } from 'react-native';
 import { ScreenContainer } from '@/components/screen-container';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useColors } from '@/hooks/use-colors';
-import Svg, { Line, Circle, Text as SvgText, Rect, Path } from 'react-native-svg';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
+
+const WEARABLE_KEY = "wearable_data";
 
 interface HealthData {
   date: string;
@@ -12,7 +15,6 @@ interface HealthData {
   sleep: number;
 }
 
-// Sample health data for the last 7 days
 const SAMPLE_DATA: HealthData[] = [
   { date: 'Pzt', steps: 8234, heartRate: 72, calories: 450, sleep: 7.5 },
   { date: 'Sal', steps: 10521, heartRate: 68, calories: 580, sleep: 8.0 },
@@ -23,319 +25,160 @@ const SAMPLE_DATA: HealthData[] = [
   { date: 'Paz', steps: 11234, heartRate: 69, calories: 650, sleep: 8.0 },
 ];
 
-// Simple bar chart component
-function BarChart({ data, metric, maxValue, color }: { 
-  data: HealthData[]; 
-  metric: keyof HealthData; 
-  maxValue: number;
-  color: string;
-}) {
-  const width = Dimensions.get('window').width - 32;
-  const height = 200;
-  const barWidth = width / (data.length * 1.5);
-  const padding = 20;
+type Metric = 'steps' | 'heartRate' | 'calories' | 'sleep';
 
-  return (
-    <Svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-      {/* Y-axis */}
-      <Line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="#ccc" strokeWidth="1" />
-      
-      {/* X-axis */}
-      <Line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#ccc" strokeWidth="1" />
-
-      {/* Bars */}
-      {data.map((item, index) => {
-        const value = typeof item[metric] === 'number' ? item[metric] : 0;
-        const barHeight = ((value / maxValue) * (height - 2 * padding));
-        const x = padding + (index * (width - 2 * padding) / data.length) + barWidth / 4;
-        const y = height - padding - barHeight;
-
-        return (
-          <View key={index}>
-            <Rect
-              x={x}
-              y={y}
-              width={barWidth}
-              height={barHeight}
-              fill={color}
-              rx={4}
-            />
-            <SvgText
-              x={x + barWidth / 2}
-              y={height - padding + 15}
-              fontSize="10"
-              fill="#666"
-              textAnchor="middle"
-            >
-              {item.date}
-            </SvgText>
-          </View>
-        );
-      })}
-    </Svg>
-  );
-}
-
-// Simple line chart component
-function LineChart({ data, metric, maxValue, color }: {
-  data: HealthData[];
-  metric: keyof HealthData;
-  maxValue: number;
-  color: string;
-}) {
-  const width = Dimensions.get('window').width - 32;
-  const height = 200;
-  const padding = 20;
-  const pointSpacing = (width - 2 * padding) / (data.length - 1);
-
-  // Calculate points
-  const points = data.map((item, index) => {
-    const value = typeof item[metric] === 'number' ? item[metric] : 0;
-    const x = padding + index * pointSpacing;
-    const y = height - padding - ((value / maxValue) * (height - 2 * padding));
-    return { x, y, value };
-  });
-
-  // Create path string
-  const pathString = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-
-  return (
-    <Svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-      {/* Y-axis */}
-      <Line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="#ccc" strokeWidth="1" />
-      
-      {/* X-axis */}
-      <Line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#ccc" strokeWidth="1" />
-
-      {/* Line */}
-      <Path d={pathString} stroke={color} strokeWidth="2" fill="none" />
-
-      {/* Points */}
-      {points.map((p, i) => (
-        <Circle key={i} cx={p.x} cy={p.y} r="3" fill={color} />
-      ))}
-
-      {/* Date labels */}
-      {data.map((item, i) => (
-        <SvgText
-          key={i}
-          x={points[i].x}
-          y={height - padding + 15}
-          fontSize="10"
-          fill="#666"
-          textAnchor="middle"
-        >
-          {item.date}
-        </SvgText>
-      ))}
-    </Svg>
-  );
-}
+const METRICS = [
+  { key: 'steps' as Metric, label: '👟 Adım', color: '#3b82f6', unit: 'adım', max: 20000 },
+  { key: 'heartRate' as Metric, label: '❤️ Kalp', color: '#ef4444', unit: 'bpm', max: 120 },
+  { key: 'calories' as Metric, label: '🔥 Kalori', color: '#f97316', unit: 'kcal', max: 1200 },
+  { key: 'sleep' as Metric, label: '😴 Uyku', color: '#8b5cf6', unit: 'saat', max: 12 },
+];
 
 export default function HealthAnalyticsScreen() {
   const colors = useColors();
-  const [selectedMetric, setSelectedMetric] = useState<'steps' | 'heartRate' | 'calories' | 'sleep'>('steps');
+  const router = useRouter();
+  const [selectedMetric, setSelectedMetric] = useState<Metric>('steps');
+  const [wearableData, setWearableData] = useState<any>(null);
+  const [chartData, setChartData] = useState(SAMPLE_DATA);
+  const { width } = Dimensions.get('window');
 
-  const getMetricLabel = () => {
-    switch (selectedMetric) {
-      case 'steps':
-        return 'Adımlar';
-      case 'heartRate':
-        return 'Kalp Hızı';
-      case 'calories':
-        return 'Kalori';
-      case 'sleep':
-        return 'Uyku';
+  useEffect(() => { loadWearableData(); }, []);
+
+  const loadWearableData = async () => {
+    const data = await AsyncStorage.getItem(WEARABLE_KEY);
+    if (data) {
+      const parsed = JSON.parse(data);
+      setWearableData(parsed);
+      // Bugünün verisini güncelle
+      const today = { ...SAMPLE_DATA[6], steps: parsed.steps, heartRate: parsed.heartRate, calories: parsed.caloriesBurned, sleep: parsed.sleep };
+      setChartData([...SAMPLE_DATA.slice(0, 6), today]);
     }
   };
 
-  const getMetricUnit = () => {
-    switch (selectedMetric) {
-      case 'steps':
-        return 'adım';
-      case 'heartRate':
-        return 'bpm';
-      case 'calories':
-        return 'kcal';
-      case 'sleep':
-        return 'saat';
-    }
-  };
+  const metric = METRICS.find(m => m.key === selectedMetric)!;
+  const barWidth = (width - 48) / chartData.length - 8;
+  const chartHeight = 160;
 
-  const getMaxValue = () => {
-    switch (selectedMetric) {
-      case 'steps':
-        return 16000;
-      case 'heartRate':
-        return 100;
-      case 'calories':
-        return 1000;
-      case 'sleep':
-        return 10;
-    }
-  };
-
-  const getChartColor = () => {
-    switch (selectedMetric) {
-      case 'steps':
-        return colors.primary;
-      case 'heartRate':
-        return '#ef4444';
-      case 'calories':
-        return '#f59e0b';
-      case 'sleep':
-        return '#8b5cf6';
-    }
-  };
-
-  const getAverageValue = () => {
-    const values = SAMPLE_DATA.map(d => typeof d[selectedMetric] === 'number' ? d[selectedMetric] : 0);
-    return (values.reduce((a, b) => a + b, 0) / values.length).toFixed(1);
-  };
-
-  const getMaxValueInData = () => {
-    const values = SAMPLE_DATA.map(d => typeof d[selectedMetric] === 'number' ? d[selectedMetric] : 0);
-    return Math.max(...values);
-  };
-
-  const getMinValueInData = () => {
-    const values = SAMPLE_DATA.map(d => typeof d[selectedMetric] === 'number' ? d[selectedMetric] : 0);
-    return Math.min(...values);
-  };
+  const todayValue = chartData[chartData.length - 1][selectedMetric];
+  const avgValue = (chartData.reduce((s, d) => s + d[selectedMetric], 0) / chartData.length).toFixed(1);
+  const maxValue = Math.max(...chartData.map(d => d[selectedMetric]));
 
   return (
-    <ScreenContainer className="p-4">
-      <ScrollView contentContainerStyle={{ gap: 16, paddingBottom: 24 }}>
-        {/* Header */}
-        <View className="gap-2">
-          <Text className="text-3xl font-bold text-foreground">Sağlık Analitikleri</Text>
-          <Text className="text-sm leading-6 text-muted">Wearable cihazlarından gelen verileriniz</Text>
+    <ScreenContainer>
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 32 }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <Text style={{ fontSize: 22, fontWeight: "bold", color: colors.foreground }}>📊 Sağlık Analizi</Text>
+          <TouchableOpacity onPress={() => router.push("/wearable-sync")}
+            style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+            <Text style={{ color: wearableData ? "#22c55e" : colors.primary, fontSize: 12, fontWeight: "600" }}>
+              {wearableData ? "⌚ Saat Bağlı" : "⌚ Saat Bağla"}
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Metric Selector */}
-        <View className="gap-3">
-          <Text className="text-sm font-semibold text-foreground">Metrik Seçin</Text>
-          <View className="flex-row gap-2 flex-wrap">
-            {(['steps', 'heartRate', 'calories', 'sleep'] as const).map((metric) => (
-              <Pressable
-                key={metric}
-                onPress={() => setSelectedMetric(metric)}
-                style={({ pressed }) => [
-                  {
-                    opacity: pressed ? 0.7 : 1,
-                    paddingHorizontal: 12,
-                    paddingVertical: 8,
-                    borderRadius: 20,
-                    backgroundColor: selectedMetric === metric ? colors.primary : colors.surface,
-                  },
-                ]}
-              >
-                <Text
-                  className={selectedMetric === metric ? 'text-white font-semibold text-sm' : 'text-foreground font-semibold text-sm'}
-                >
-                  {metric === 'steps' && '👣 Adımlar'}
-                  {metric === 'heartRate' && '❤️ Kalp'}
-                  {metric === 'calories' && '🔥 Kalori'}
-                  {metric === 'sleep' && '😴 Uyku'}
+        {wearableData && (
+          <View style={{ backgroundColor: "#22c55e20", borderRadius: 10, padding: 12, borderWidth: 1, borderColor: "#22c55e" }}>
+            <Text style={{ color: "#22c55e", fontWeight: "600", fontSize: 13 }}>
+              ✅ Akıllı saat verileri senkronize edildi — son sync: {wearableData.lastSync}
+            </Text>
+          </View>
+        )}
+
+        {/* Metrik Seçimi */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {METRICS.map(m => (
+              <TouchableOpacity key={m.key} onPress={() => setSelectedMetric(m.key)}
+                style={{
+                  paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20,
+                  backgroundColor: selectedMetric === m.key ? m.color : colors.surface,
+                  borderWidth: 2, borderColor: selectedMetric === m.key ? m.color : colors.border,
+                }}>
+                <Text style={{ color: selectedMetric === m.key ? "#fff" : colors.foreground, fontWeight: "600" }}>
+                  {m.label}
                 </Text>
-              </Pressable>
+              </TouchableOpacity>
             ))}
           </View>
-        </View>
+        </ScrollView>
 
-        {/* Chart Card */}
-        <View className="bg-surface rounded-lg p-4">
-          <View className="gap-4">
-            <View>
-              <Text className="text-lg font-semibold text-foreground">{getMetricLabel()}</Text>
-              <Text className="text-xs text-muted mt-1">Son 7 günün verileri</Text>
-            </View>
-
-            {/* Chart */}
-            <View className="items-center">
-              {selectedMetric === 'heartRate' || selectedMetric === 'sleep' ? (
-                <LineChart
-                  data={SAMPLE_DATA}
-                  metric={selectedMetric}
-                  maxValue={getMaxValue()}
-                  color={getChartColor()}
-                />
-              ) : (
-                <BarChart
-                  data={SAMPLE_DATA}
-                  metric={selectedMetric}
-                  maxValue={getMaxValue()}
-                  color={getChartColor()}
-                />
-              )}
-            </View>
-          </View>
-        </View>
-
-        {/* Statistics */}
-        <View className="gap-3">
-          <Text className="text-sm font-semibold text-foreground">İstatistikler</Text>
-          <View className="flex-row gap-3">
-            {/* Average */}
-            <View className="flex-1 bg-surface rounded-lg p-4">
-              <Text className="text-xs text-muted mb-1">Ortalama</Text>
-              <Text className="text-2xl font-bold text-foreground">
-                {getAverageValue()}
-              </Text>
-              <Text className="text-xs text-muted mt-1">{getMetricUnit()}</Text>
-            </View>
-
-            {/* Max */}
-            <View className="flex-1 bg-surface rounded-lg p-4">
-              <Text className="text-xs text-muted mb-1">Maksimum</Text>
-              <Text className="text-2xl font-bold text-foreground">
-                {getMaxValueInData()}
-              </Text>
-              <Text className="text-xs text-muted mt-1">{getMetricUnit()}</Text>
-            </View>
-
-            {/* Min */}
-            <View className="flex-1 bg-surface rounded-lg p-4">
-              <Text className="text-xs text-muted mb-1">Minimum</Text>
-              <Text className="text-2xl font-bold text-foreground">
-                {getMinValueInData()}
-              </Text>
-              <Text className="text-xs text-muted mt-1">{getMetricUnit()}</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Weekly Summary */}
-        <View className="bg-surface rounded-lg p-4 gap-3">
-          <Text className="text-sm font-semibold text-foreground">Haftalık Özet</Text>
-          {SAMPLE_DATA.map((item, index) => (
-            <View key={index} className="flex-row items-center justify-between pb-3 border-b border-border last:border-b-0">
-              <Text className="text-sm font-medium text-foreground">{item.date}</Text>
-              <View className="flex-row items-center gap-4">
-                <View className="flex-row items-center gap-1">
-                  <Text className="text-xs text-muted">👣</Text>
-                  <Text className="text-sm text-foreground font-semibold">{item.steps}</Text>
-                </View>
-                <View className="flex-row items-center gap-1">
-                  <Text className="text-xs text-muted">❤️</Text>
-                  <Text className="text-sm text-foreground font-semibold">{item.heartRate}</Text>
-                </View>
-                <View className="flex-row items-center gap-1">
-                  <Text className="text-xs text-muted">😴</Text>
-                  <Text className="text-sm text-foreground font-semibold">{item.sleep}h</Text>
-                </View>
-              </View>
+        {/* Özet Kartlar */}
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          {[
+            { label: "Bugün", value: todayValue, color: metric.color },
+            { label: "Ortalama", value: avgValue, color: colors.primary },
+            { label: "En Yüksek", value: maxValue, color: "#22c55e" },
+          ].map(card => (
+            <View key={card.label} style={{
+              flex: 1, backgroundColor: colors.surface, borderRadius: 10, padding: 12,
+              borderWidth: 1, borderColor: colors.border, alignItems: "center", gap: 4,
+            }}>
+              <Text style={{ fontSize: 18, fontWeight: "bold", color: card.color }}>{card.value}</Text>
+              <Text style={{ fontSize: 11, color: colors.muted }}>{metric.unit}</Text>
+              <Text style={{ fontSize: 12, color: colors.foreground }}>{card.label}</Text>
             </View>
           ))}
         </View>
 
-        {/* Info Card */}
-        <View className="bg-primary/10 rounded-lg p-4 border border-primary gap-2">
-          <Text className="text-xs font-semibold text-primary uppercase">💡 İpucu</Text>
-          <Text className="text-xs leading-5 text-primary">
-            Sağlık verileriniz Apple Health veya Google Fit ile senkronize edilir. Daha doğru veriler için wearable cihazınızı bağlayın.
+        {/* Bar Chart */}
+        <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: colors.border }}>
+          <Text style={{ fontWeight: "700", color: colors.foreground, marginBottom: 12 }}>
+            {metric.label} — Son 7 Gün
           </Text>
+          <View style={{ flexDirection: "row", alignItems: "flex-end", height: chartHeight, gap: 8 }}>
+            {chartData.map((d, i) => {
+              const value = d[selectedMetric];
+              const barH = (value / metric.max) * chartHeight;
+              const isToday = i === chartData.length - 1;
+              return (
+                <View key={d.date} style={{ flex: 1, alignItems: "center", gap: 4 }}>
+                  <Text style={{ fontSize: 10, color: metric.color, fontWeight: "600" }}>
+                    {typeof value === 'number' && value > 999 ? `${(value/1000).toFixed(1)}k` : value}
+                  </Text>
+                  <View style={{
+                    width: "100%", height: Math.max(barH, 4), borderRadius: 4,
+                    backgroundColor: isToday ? metric.color : metric.color + "60",
+                  }} />
+                  <Text style={{ fontSize: 10, color: isToday ? metric.color : colors.muted, fontWeight: isToday ? "700" : "400" }}>
+                    {d.date}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
         </View>
+
+        {/* Bugünkü Saat Verileri */}
+        {wearableData && (
+          <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: colors.border, gap: 10 }}>
+            <Text style={{ fontWeight: "700", color: colors.foreground }}>⌚ Bugünkü Saat Verileri</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+              {[
+                { icon: "👟", label: "Adım", value: wearableData.steps.toLocaleString(), unit: "adım", color: "#3b82f6", goal: 10000 },
+                { icon: "❤️", label: "Kalp", value: wearableData.heartRate, unit: "bpm", color: "#ef4444", goal: null },
+                { icon: "😴", label: "Uyku", value: wearableData.sleep, unit: "saat", color: "#8b5cf6", goal: 8 },
+                { icon: "🔥", label: "Kalori", value: wearableData.caloriesBurned, unit: "kcal", color: "#f97316", goal: 500 },
+              ].map(item => (
+                <View key={item.label} style={{
+                  flex: 1, minWidth: "45%", backgroundColor: item.color + "15",
+                  borderRadius: 10, padding: 12, borderWidth: 1, borderColor: item.color + "40", gap: 2,
+                }}>
+                  <Text>{item.icon} {item.label}</Text>
+                  <Text style={{ fontSize: 18, fontWeight: "bold", color: item.color }}>{item.value}</Text>
+                  <Text style={{ fontSize: 11, color: colors.muted }}>{item.unit}</Text>
+                  {item.goal && (
+                    <View style={{ height: 4, backgroundColor: colors.border, borderRadius: 2, marginTop: 4 }}>
+                      <View style={{
+                        height: 4, backgroundColor: item.color, borderRadius: 2,
+                        width: `${Math.min((Number(item.value.toString().replace(',','')) / item.goal) * 100, 100)}%`
+                      }} />
+                    </View>
+                  )}
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
       </ScrollView>
     </ScreenContainer>
   );

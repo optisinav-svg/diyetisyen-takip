@@ -3,21 +3,20 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 export interface UserRegistration {
   name: string;
   email: string;
-  password: string;
   role: "dietitian" | "client";
   registeredAt: string;
+  biometricEnabled: boolean;
 }
 
 const STORAGE_KEY = "user_registration";
 
-/**
- * Kullanıcı kayıt bilgilerini AsyncStorage'a kaydet
- */
-export async function saveUserRegistration(user: UserRegistration): Promise<void> {
+export async function saveUserRegistration(user: Omit<UserRegistration, "registeredAt" | "biometricEnabled">): Promise<void> {
   try {
-    const userData = {
+    const existing = await getUserRegistration();
+    const userData: UserRegistration = {
       ...user,
-      registeredAt: new Date().toISOString(),
+      registeredAt: existing?.registeredAt ?? new Date().toISOString(),
+      biometricEnabled: existing?.biometricEnabled ?? false,
     };
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
   } catch (error) {
@@ -26,9 +25,6 @@ export async function saveUserRegistration(user: UserRegistration): Promise<void
   }
 }
 
-/**
- * AsyncStorage'dan kayıtlı kullanıcı bilgilerini al
- */
 export async function getUserRegistration(): Promise<UserRegistration | null> {
   try {
     const data = await AsyncStorage.getItem(STORAGE_KEY);
@@ -40,9 +36,16 @@ export async function getUserRegistration(): Promise<UserRegistration | null> {
   }
 }
 
-/**
- * Kullanıcı kayıt bilgilerini sil
- */
+export async function setBiometricEnabled(enabled: boolean): Promise<void> {
+  try {
+    const user = await getUserRegistration();
+    if (!user) return;
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ ...user, biometricEnabled: enabled }));
+  } catch (error) {
+    console.error("Failed to set biometric enabled:", error);
+  }
+}
+
 export async function clearUserRegistration(): Promise<void> {
   try {
     await AsyncStorage.removeItem(STORAGE_KEY);
@@ -52,15 +55,11 @@ export async function clearUserRegistration(): Promise<void> {
   }
 }
 
-/**
- * Kullanıcı kayıtlı mı kontrol et
- */
 export async function isUserRegistered(): Promise<boolean> {
   try {
     const user = await getUserRegistration();
     return user !== null;
   } catch (error) {
-    console.error("Failed to check user registration:", error);
     return false;
   }
 }

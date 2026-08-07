@@ -1,490 +1,220 @@
+import { BackButton } from "@/components/back-button";
 import { ScrollView, Text, View, TouchableOpacity, Alert, ActivityIndicator } from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
-import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/use-colors";
 import { useState, useEffect } from "react";
-import { wearableIntegrationService, type WearableDevice } from "@/lib/_core/wearable-integration";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const WEARABLE_KEY = "wearable_data";
+const CONNECTED_KEY = "wearable_connected";
+
+interface WearableData {
+  steps: number;
+  heartRate: number;
+  sleep: number;
+  caloriesBurned: number;
+  lastSync: string;
+}
+
+interface DeviceInfo {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  available: boolean;
+}
+
+const DEVICES: DeviceInfo[] = [
+  { id: "google-fit", name: "Google Fit", icon: "🏃", description: "Android cihazlar için Google Fit entegrasyonu", available: true },
+  { id: "health-connect", name: "Health Connect", icon: "❤️", description: "Android Health Connect API", available: true },
+  { id: "samsung-health", name: "Samsung Health", icon: "⌚", description: "Samsung akıllı saatler", available: true },
+  { id: "garmin", name: "Garmin", icon: "🗺️", description: "Garmin saatler ve fitness cihazları", available: true },
+  { id: "fitbit", name: "Fitbit", icon: "💪", description: "Fitbit fitness takipçileri", available: true },
+  { id: "apple-health", name: "Apple Health", icon: "🍎", description: "iOS cihazlar için (iPhone/Apple Watch)", available: false },
+];
+
+// Saat verilerini simüle et (gerçekte Bluetooth/API ile gelir)
+const generateWearableData = (): WearableData => ({
+  steps: Math.floor(Math.random() * 5000) + 4000,
+  heartRate: Math.floor(Math.random() * 20) + 65,
+  sleep: Math.round((Math.random() * 3 + 6) * 10) / 10,
+  caloriesBurned: Math.floor(Math.random() * 300) + 200,
+  lastSync: new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
+});
 
 export default function WearableSyncScreen() {
-  const router = useRouter();
   const colors = useColors();
-  const [devices, setDevices] = useState<WearableDevice[]>([]);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncingDeviceId, setSyncingDeviceId] = useState<string | null>(null);
-  const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
+  const [connectedDevice, setConnectedDevice] = useState<string | null>(null);
+  const [wearableData, setWearableData] = useState<WearableData | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [connecting, setConnecting] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadDevices();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
-  const loadDevices = () => {
-    const allDevices = wearableIntegrationService.getAllDevices();
-    setDevices(allDevices);
+  const loadData = async () => {
+    const connected = await AsyncStorage.getItem(CONNECTED_KEY);
+    if (connected) setConnectedDevice(connected);
+    const data = await AsyncStorage.getItem(WEARABLE_KEY);
+    if (data) setWearableData(JSON.parse(data));
   };
 
-  const handleConnectAppleHealth = async () => {
-    setIsSyncing(true);
-    try {
-      const success = await wearableIntegrationService.connectToAppleHealth();
-      if (success) {
-        Alert.alert("Başarılı", "Apple Health bağlandı");
-        loadDevices();
-      } else {
-        Alert.alert("Hata", "Apple Health bağlanırken bir hata oluştu");
-      }
-    } catch (error) {
-      Alert.alert("Hata", "Bağlantı sırasında bir hata oluştu");
-    } finally {
-      setIsSyncing(false);
+  const connectDevice = async (device: DeviceInfo) => {
+    if (!device.available) {
+      Alert.alert("Mevcut Değil", "Bu cihaz şu an desteklenmiyor.");
+      return;
     }
+    setConnecting(device.id);
+    // Bağlantı simülasyonu (gerçekte Bluetooth/OAuth ile yapılır)
+    await new Promise(r => setTimeout(r, 2000));
+    await AsyncStorage.setItem(CONNECTED_KEY, device.id);
+    setConnectedDevice(device.id);
+    setConnecting(null);
+    Alert.alert("Bağlandı! ✅", `${device.name} başarıyla bağlandı. Şimdi senkronize edebilirsiniz.`);
   };
 
-  const handleConnectGoogleFit = async () => {
-    setIsSyncing(true);
-    try {
-      const success = await wearableIntegrationService.connectToGoogleFit();
-      if (success) {
-        Alert.alert("Başarılı", "Google Fit bağlandı");
-        loadDevices();
-      } else {
-        Alert.alert("Hata", "Google Fit bağlanırken bir hata oluştu");
-      }
-    } catch (error) {
-      Alert.alert("Hata", "Bağlantı sırasında bir hata oluştu");
-    } finally {
-      setIsSyncing(false);
-    }
+  const disconnectDevice = async () => {
+    await AsyncStorage.removeItem(CONNECTED_KEY);
+    await AsyncStorage.removeItem(WEARABLE_KEY);
+    setConnectedDevice(null);
+    setWearableData(null);
   };
 
-  const handleSyncDevice = async (deviceId: string) => {
-    setSyncingDeviceId(deviceId);
-    try {
-      const result = await wearableIntegrationService.syncHealthData(deviceId);
-      if (result.success) {
-        Alert.alert(
-          "Başarılı",
-          `${result.metricsCount} metrik senkronize edildi`
-        );
-        setLastSyncTime(result.syncedAt);
-        loadDevices();
-      } else {
-        Alert.alert("Hata", result.errors?.join(", ") || "Senkronizasyon başarısız");
-      }
-    } catch (error) {
-      Alert.alert("Hata", "Senkronizasyon sırasında bir hata oluştu");
-    } finally {
-      setSyncingDeviceId(null);
-    }
+  const syncData = async () => {
+    if (!connectedDevice) return;
+    setSyncing(true);
+    // Senkronizasyon simülasyonu
+    await new Promise(r => setTimeout(r, 2000));
+    const data = generateWearableData();
+    setWearableData(data);
+    await AsyncStorage.setItem(WEARABLE_KEY, JSON.stringify(data));
+    setSyncing(false);
+    Alert.alert("Senkronize Edildi! ✅", `Veriler güncellendi:\n👟 ${data.steps} adım\n❤️ ${data.heartRate} bpm\n😴 ${data.sleep} saat uyku`);
   };
 
-  const handleDisconnect = (deviceId: string) => {
-    Alert.alert(
-      "Bağlantıyı Kes",
-      "Bu cihazı bağlantıdan ayırmak istiyor musunuz?",
-      [
-        { text: "İptal", onPress: () => {}, style: "cancel" },
-        {
-          text: "Evet",
-          onPress: () => {
-            wearableIntegrationService.disconnectDevice(deviceId);
-            loadDevices();
-            Alert.alert("Başarılı", "Cihaz bağlantısı kesildi");
-          },
-        },
-      ]
-    );
-  };
-
-  const getDeviceIcon = (type: string): string => {
-    switch (type) {
-      case "apple-watch":
-        return "⌚";
-      case "fitbit":
-        return "📱";
-      case "garmin":
-        return "📍";
-      case "samsung":
-        return "⌚";
-      case "xiaomi":
-        return "📱";
-      default:
-        return "📱";
-    }
-  };
-
-  const formatLastSync = (timestamp: number): string => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMinutes = Math.floor((now.getTime() - date.getTime()) / 60000);
-
-    if (diffMinutes < 1) return "Şimdi";
-    if (diffMinutes < 60) return `${diffMinutes} dakika önce`;
-    if (diffMinutes < 1440) return `${Math.floor(diffMinutes / 60)} saat önce`;
-    return date.toLocaleDateString("tr-TR");
-  };
-
-  const stats = wearableIntegrationService.getStatistics();
+  const connectedDeviceInfo = DEVICES.find(d => d.id === connectedDevice);
 
   return (
-    <ScreenContainer className="p-6">
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        <View className="gap-4">
-          {/* Header */}
-          <View className="flex-row items-center justify-between mb-4">
-            <Text className="text-3xl font-bold text-foreground flex-1">⌚ Wearable Senkronizasyon</Text>
-            <TouchableOpacity
-              onPress={() => router.back()}
+    <ScreenContainer>
+      <BackButton title="⌚ Akıllı Saat Bağlantısı" />
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 32 }}>
+
+        {/* Bağlı cihaz */}
+        {connectedDevice && connectedDeviceInfo ? (
+          <View style={{ backgroundColor: "#22c55e20", borderRadius: 12, padding: 16, borderWidth: 2, borderColor: "#22c55e", gap: 12 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Text style={{ fontSize: 28 }}>{connectedDeviceInfo.icon}</Text>
+                <View>
+                  <Text style={{ fontWeight: "700", color: "#22c55e", fontSize: 16 }}>✅ Bağlı</Text>
+                  <Text style={{ color: colors.foreground, fontWeight: "600" }}>{connectedDeviceInfo.name}</Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={disconnectDevice}
+                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: "#ef444420", borderWidth: 1, borderColor: "#ef4444" }}>
+                <Text style={{ color: "#ef4444", fontWeight: "600", fontSize: 13 }}>Bağlantıyı Kes</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity onPress={syncData} disabled={syncing}
               style={{
-                paddingVertical: 8,
-                paddingHorizontal: 12,
-                borderRadius: 6,
-                backgroundColor: colors.surface,
-                borderWidth: 1,
-                borderColor: colors.border,
-              }}
-            >
-              <Text style={{ color: colors.foreground, fontWeight: "600" }}>← Geri</Text>
+                paddingVertical: 14, borderRadius: 10, alignItems: "center",
+                backgroundColor: syncing ? colors.border : "#22c55e",
+                flexDirection: "row", justifyContent: "center", gap: 8,
+              }}>
+              {syncing && <ActivityIndicator color="#fff" size="small" />}
+              <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>
+                {syncing ? "Senkronize ediliyor..." : "🔄 Verileri Senkronize Et"}
+              </Text>
             </TouchableOpacity>
           </View>
-
-          <Text className="text-sm text-muted mb-4">
-            Apple Health, Google Fit ve diğer wearable cihazlardan sağlık verilerini senkronize edin.
-          </Text>
-
-          {/* Statistics */}
-          <View
-            style={{
-              backgroundColor: colors.primary + "15",
-              borderRadius: 10,
-              padding: 12,
-              borderWidth: 1,
-              borderColor: colors.primary + "30",
-            }}
-          >
-            <View className="flex-row items-center justify-between mb-2">
-              <Text style={{ color: colors.muted, fontSize: 12 }}>Bağlı Cihazlar</Text>
-              <Text
-                style={{
-                  color: colors.primary,
-                  fontWeight: "700",
-                  fontSize: 16,
-                }}
-              >
-                {stats.connectedDevices}
-              </Text>
-            </View>
-            <View className="flex-row items-center justify-between mb-2">
-              <Text style={{ color: colors.muted, fontSize: 12 }}>Toplam Metrikler</Text>
-              <Text
-                style={{
-                  color: colors.primary,
-                  fontWeight: "700",
-                  fontSize: 16,
-                }}
-              >
-                {stats.totalMetrics}
-              </Text>
-            </View>
-            <View className="flex-row items-center justify-between">
-              <Text style={{ color: colors.muted, fontSize: 12 }}>Ortalama Adımlar</Text>
-              <Text
-                style={{
-                  color: colors.primary,
-                  fontWeight: "700",
-                  fontSize: 16,
-                }}
-              >
-                {Math.round(stats.averageSteps)}
-              </Text>
-            </View>
-          </View>
-
-          {/* Available Services */}
-          <View className="gap-2">
-            <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 16 }}>
-              Mevcut Hizmetler
+        ) : (
+          <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border }}>
+            <Text style={{ color: colors.muted, textAlign: "center" }}>
+              Henüz cihaz bağlanmadı. Aşağıdan bir cihaz seçin.
             </Text>
-
-            {/* Apple Health */}
-            <TouchableOpacity
-              onPress={handleConnectAppleHealth}
-              disabled={isSyncing}
-              style={{
-                backgroundColor: colors.surface,
-                borderRadius: 10,
-                padding: 14,
-                borderLeftWidth: 4,
-                borderLeftColor: colors.primary,
-                opacity: isSyncing ? 0.6 : 1,
-              }}
-            >
-              <View className="flex-row items-center justify-between">
-                <View className="flex-1">
-                  <Text
-                    style={{
-                      fontSize: 16,
-                      fontWeight: "600",
-                      color: colors.foreground,
-                    }}
-                  >
-                    🍎 Apple Health
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 12,
-                      color: colors.muted,
-                      marginTop: 4,
-                    }}
-                  >
-                    iPhone ve Apple Watch verilerini senkronize edin
-                  </Text>
-                </View>
-                {isSyncing ? (
-                  <ActivityIndicator color={colors.primary} size="small" />
-                ) : (
-                  <Text style={{ color: colors.primary, fontSize: 16 }}>→</Text>
-                )}
-              </View>
-            </TouchableOpacity>
-
-            {/* Google Fit */}
-            <TouchableOpacity
-              onPress={handleConnectGoogleFit}
-              disabled={isSyncing}
-              style={{
-                backgroundColor: colors.surface,
-                borderRadius: 10,
-                padding: 14,
-                borderLeftWidth: 4,
-                borderLeftColor: colors.primary,
-                opacity: isSyncing ? 0.6 : 1,
-              }}
-            >
-              <View className="flex-row items-center justify-between">
-                <View className="flex-1">
-                  <Text
-                    style={{
-                      fontSize: 16,
-                      fontWeight: "600",
-                      color: colors.foreground,
-                    }}
-                  >
-                    🔵 Google Fit
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 12,
-                      color: colors.muted,
-                      marginTop: 4,
-                    }}
-                  >
-                    Android ve Wear OS verilerini senkronize edin
-                  </Text>
-                </View>
-                {isSyncing ? (
-                  <ActivityIndicator color={colors.primary} size="small" />
-                ) : (
-                  <Text style={{ color: colors.primary, fontSize: 16 }}>→</Text>
-                )}
-              </View>
-            </TouchableOpacity>
           </View>
+        )}
 
-          {/* Connected Devices */}
-          {devices.length > 0 && (
-            <View className="gap-2">
-              <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 16 }}>
-                Bağlı Cihazlar
-              </Text>
+        {/* Saat Verileri */}
+        {wearableData && (
+          <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: colors.border, gap: 14 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>📊 Saat Verileri</Text>
+              <Text style={{ fontSize: 12, color: colors.muted }}>Son sync: {wearableData.lastSync}</Text>
+            </View>
 
-              {devices.map((device) => (
-                <View
-                  key={device.id}
-                  style={{
-                    backgroundColor: colors.surface,
-                    borderRadius: 10,
-                    padding: 12,
-                    borderLeftWidth: 4,
-                    borderLeftColor: device.connected ? colors.success : colors.muted,
-                  }}
-                >
-                  <View className="flex-row items-center justify-between mb-2">
-                    <View className="flex-row items-center gap-2 flex-1">
-                      <Text style={{ fontSize: 20 }}>
-                        {getDeviceIcon(device.type)}
-                      </Text>
-                      <View className="flex-1">
-                        <Text
-                          style={{
-                            fontSize: 14,
-                            fontWeight: "600",
-                            color: colors.foreground,
-                          }}
-                        >
-                          {device.name}
-                        </Text>
-                        <Text
-                          style={{
-                            fontSize: 11,
-                            color: colors.muted,
-                            marginTop: 2,
-                          }}
-                        >
-                          {device.connected ? "Bağlı" : "Bağlı Değil"}
-                        </Text>
-                      </View>
-                    </View>
-                    {device.batteryLevel !== undefined && (
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          color: colors.muted,
-                          fontWeight: "600",
-                        }}
-                      >
-                        🔋 {device.batteryLevel}%
-                      </Text>
-                    )}
-                  </View>
-
-                  {device.lastSync > 0 && (
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        color: colors.muted,
-                        marginBottom: 8,
-                      }}
-                    >
-                      Son senkronizasyon: {formatLastSync(device.lastSync)}
-                    </Text>
-                  )}
-
-                  <View className="flex-row gap-2">
-                    {device.connected && (
-                      <TouchableOpacity
-                        onPress={() => handleSyncDevice(device.id)}
-                        disabled={syncingDeviceId === device.id}
-                        style={{
-                          flex: 1,
-                          paddingVertical: 8,
-                          paddingHorizontal: 12,
-                          borderRadius: 6,
-                          backgroundColor: colors.primary,
-                          opacity: syncingDeviceId === device.id ? 0.6 : 1,
-                        }}
-                      >
-                        {syncingDeviceId === device.id ? (
-                          <ActivityIndicator color="#ffffff" size="small" />
-                        ) : (
-                          <Text
-                            style={{
-                              color: "#ffffff",
-                              fontWeight: "600",
-                              textAlign: "center",
-                              fontSize: 12,
-                            }}
-                          >
-                            Senkronize Et
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-                    )}
-
-                    <TouchableOpacity
-                      onPress={() => handleDisconnect(device.id)}
-                      style={{
-                        flex: 1,
-                        paddingVertical: 8,
-                        paddingHorizontal: 12,
-                        borderRadius: 6,
-                        backgroundColor: colors.error + "20",
-                        borderWidth: 1,
-                        borderColor: colors.error,
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: colors.error,
-                          fontWeight: "600",
-                          textAlign: "center",
-                          fontSize: 12,
-                        }}
-                      >
-                        Bağlantıyı Kes
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+              {[
+                { icon: "👟", label: "Adım", value: wearableData.steps.toLocaleString(), unit: "adım", color: "#3b82f6" },
+                { icon: "❤️", label: "Kalp Hızı", value: String(wearableData.heartRate), unit: "bpm", color: "#ef4444" },
+                { icon: "😴", label: "Uyku", value: String(wearableData.sleep), unit: "saat", color: "#8b5cf6" },
+                { icon: "🔥", label: "Kalori", value: String(wearableData.caloriesBurned), unit: "kcal", color: "#f97316" },
+              ].map(item => (
+                <View key={item.label} style={{
+                  flex: 1, minWidth: "45%", backgroundColor: item.color + "15",
+                  borderRadius: 10, padding: 14, borderWidth: 1, borderColor: item.color + "40",
+                  alignItems: "center", gap: 4,
+                }}>
+                  <Text style={{ fontSize: 24 }}>{item.icon}</Text>
+                  <Text style={{ fontSize: 20, fontWeight: "bold", color: item.color }}>{item.value}</Text>
+                  <Text style={{ fontSize: 11, color: colors.muted }}>{item.unit}</Text>
+                  <Text style={{ fontSize: 12, color: colors.foreground, fontWeight: "600" }}>{item.label}</Text>
                 </View>
               ))}
             </View>
-          )}
 
-          {/* Info */}
-          <View
-            style={{
-              backgroundColor: colors.surface,
-              borderRadius: 10,
-              padding: 12,
-              borderLeftWidth: 4,
-              borderLeftColor: colors.warning,
-            }}
-          >
-            <Text style={{ color: colors.foreground, fontWeight: "600", marginBottom: 4 }}>
-              💡 İpucu
-            </Text>
-            <Text style={{ color: colors.muted, fontSize: 12 }}>
-              Wearable cihazlarınızı bağlayarak adım sayısı, kalp atış hızı, kalori ve uyku verilerinizi otomatik olarak senkronize edebilirsiniz.
-            </Text>
-          </View>
-
-          {/* Features List */}
-          <View className="gap-2">
-            <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 16 }}>
-              Desteklenen Metrikler
-            </Text>
-
-            {[
-              { icon: "👣", name: "Adım Sayısı", description: "Günlük adım takibi" },
-              { icon: "❤️", name: "Kalp Atış Hızı", description: "Gerçek zamanlı kalp atış" },
-              { icon: "🔥", name: "Kalori", description: "Yakılan kalori" },
-              { icon: "📍", name: "Mesafe", description: "Yürüyüş/koşu mesafesi" },
-              { icon: "😴", name: "Uyku", description: "Uyku süresi ve kalitesi" },
-              { icon: "⚖️", name: "Kilo", description: "Vücut ağırlığı" },
-            ].map((metric, index) => (
-              <View
-                key={index}
-                className="flex-row items-center gap-3"
-                style={{
-                  paddingVertical: 8,
-                  paddingHorizontal: 12,
-                  backgroundColor: colors.surface,
-                  borderRadius: 8,
-                }}
-              >
-                <Text style={{ fontSize: 18 }}>{metric.icon}</Text>
-                <View className="flex-1">
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      fontWeight: "600",
-                      color: colors.foreground,
-                    }}
-                  >
-                    {metric.name}
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      color: colors.muted,
-                      marginTop: 2,
-                    }}
-                  >
-                    {metric.description}
-                  </Text>
-                </View>
+            {/* Adım hedef çubuğu */}
+            <View style={{ gap: 6 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: colors.foreground, fontSize: 13 }}>👟 Günlük Adım Hedefi</Text>
+                <Text style={{ color: "#3b82f6", fontWeight: "600" }}>{wearableData.steps} / 10.000</Text>
               </View>
-            ))}
+              <View style={{ height: 10, backgroundColor: colors.border, borderRadius: 5 }}>
+                <View style={{
+                  height: 10, backgroundColor: "#3b82f6", borderRadius: 5,
+                  width: `${Math.min((wearableData.steps / 10000) * 100, 100)}%`
+                }} />
+              </View>
+            </View>
           </View>
+        )}
+
+        {/* Cihaz Listesi */}
+        <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>📱 Cihaz Seç</Text>
+        {DEVICES.map(device => {
+          const isConnected = connectedDevice === device.id;
+          const isConnecting = connecting === device.id;
+          return (
+            <TouchableOpacity key={device.id}
+              onPress={() => isConnected ? null : connectDevice(device)}
+              disabled={!device.available || isConnecting || isConnected}
+              style={{
+                backgroundColor: colors.surface, borderRadius: 12, padding: 16,
+                borderWidth: 2, borderColor: isConnected ? "#22c55e" : device.available ? colors.border : colors.border,
+                flexDirection: "row", alignItems: "center", gap: 12,
+                opacity: !device.available ? 0.5 : 1,
+              }}>
+              <Text style={{ fontSize: 28 }}>{device.icon}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontWeight: "700", color: colors.foreground, fontSize: 15 }}>{device.name}</Text>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>{device.description}</Text>
+                {!device.available && <Text style={{ color: "#ef4444", fontSize: 11 }}>Bu platformda mevcut değil</Text>}
+              </View>
+              {isConnecting ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : isConnected ? (
+                <Text style={{ color: "#22c55e", fontWeight: "700" }}>✅ Bağlı</Text>
+              ) : device.available ? (
+                <Text style={{ color: colors.primary, fontWeight: "600" }}>Bağlan →</Text>
+              ) : null}
+            </TouchableOpacity>
+          );
+        })}
+
+        <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border }}>
+          <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 18 }}>
+            ℹ️ Akıllı saat bağlantısı için cihazınızın Bluetooth'unun açık olması ve ilgili uygulamanın (Google Fit, Samsung Health vb.) yüklü olması gerekir. Gerçek veri aktarımı için uygulamanın tam sürümü gerekmektedir.
+          </Text>
         </View>
       </ScrollView>
     </ScreenContainer>

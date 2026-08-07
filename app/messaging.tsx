@@ -1,274 +1,266 @@
 import {
-  ScrollView,
-  Text,
-  View,
-  Pressable,
-  TextInput,
-  FlatList,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
+  ScrollView, Text, View, TextInput,
+  FlatList, KeyboardAvoidingView, Platform, TouchableOpacity,
 } from 'react-native';
 import { ScreenContainer } from '@/components/screen-container';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useState, useEffect, useRef } from 'react';
+import { BackButton } from '@/components/back-button';
+import { useState, useRef, useEffect } from 'react';
 import { useColors } from '@/hooks/use-colors';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getUserRegistration } from '@/lib/_core/user-registration';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const MESSAGES_KEY = "chat_messages";
 
 interface Message {
-  id: number;
-  senderUserId: number;
+  id: string;
+  senderId: string;
   senderName: string;
-  senderRole: 'dietitian' | 'client';
   content: string;
   createdAt: string;
-  isRead: boolean;
 }
+
+interface Contact {
+  id: string;
+  name: string;
+  role: 'dietitian' | 'client';
+  lastMessage?: string;
+  unread?: number;
+}
+
+// Danışan → tek diyetisyen görür
+// Diyetisyen → kendi danışanlarını görür
+const DIETITIAN_CONTACTS: Contact[] = [
+  { id: 'c1', name: 'Ayşe Yılmaz', role: 'client', lastMessage: 'Teşekkür ederim!', unread: 1 },
+  { id: 'c2', name: 'Mehmet Demir', role: 'client', lastMessage: 'Öğün planı için teşekkürler', unread: 0 },
+  { id: 'c3', name: 'Fatma Kaya', role: 'client', lastMessage: 'Yarın randevum var', unread: 2 },
+];
+
+const CLIENT_CONTACTS: Contact[] = [
+  { id: 'd1', name: 'Diyetisyeniniz', role: 'dietitian', lastMessage: 'Protein alımını artır', unread: 1 },
+];
+
+const INITIAL_MESSAGES: Record<string, Message[]> = {
+  'c1': [
+    { id: '1', senderId: 'd1', senderName: 'Diyetisyen', content: 'Merhaba Ayşe! Nasılsınız?', createdAt: new Date(Date.now() - 7200000).toISOString() },
+    { id: '2', senderId: 'me', senderName: 'Ben', content: 'Teşekkür ederim!', createdAt: new Date(Date.now() - 3600000).toISOString() },
+  ],
+  'c2': [
+    { id: '1', senderId: 'me', senderName: 'Ben', content: 'Öğün planınızı gönderdim.', createdAt: new Date(Date.now() - 3600000).toISOString() },
+    { id: '2', senderId: 'c2', senderName: 'Mehmet', content: 'Öğün planı için teşekkürler', createdAt: new Date(Date.now() - 1800000).toISOString() },
+  ],
+  'c3': [
+    { id: '1', senderId: 'c3', senderName: 'Fatma', content: 'Yarın randevum var', createdAt: new Date(Date.now() - 900000).toISOString() },
+  ],
+  'd1': [
+    { id: '1', senderId: 'd1', senderName: 'Diyetisyeniniz', content: 'Merhaba! Bu hafta nasıl gidiyor?', createdAt: new Date(Date.now() - 7200000).toISOString() },
+    { id: '2', senderId: 'me', senderName: 'Ben', content: 'Çok iyi, öğünleri düzenli alıyorum.', createdAt: new Date(Date.now() - 3600000).toISOString() },
+    { id: '3', senderId: 'd1', senderName: 'Diyetisyeniniz', content: 'Protein alımını artırmaya devam et.', createdAt: new Date(Date.now() - 1800000).toISOString() },
+  ],
+};
 
 export default function MessagingScreen() {
   const colors = useColors();
-  const router = useRouter();
-  const { pairingId, dietitianName, clientName } = useLocalSearchParams();
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 1,
-      senderUserId: 1,
-      senderName: 'Dr. Mehmet Kaya',
-      senderRole: 'dietitian',
-      content: 'Merhaba Ayşe, bu hafta nasıl gidiyor?',
-      createdAt: new Date(Date.now() - 3600000).toISOString(),
-      isRead: true,
-    },
-    {
-      id: 2,
-      senderUserId: 2,
-      senderName: 'Ayşe Yılmaz',
-      senderRole: 'client',
-      content: 'Merhaba Dr. Kaya! Çok iyi gidiyor, öğünleri düzenli alıyorum.',
-      createdAt: new Date(Date.now() - 3000000).toISOString(),
-      isRead: true,
-    },
-    {
-      id: 3,
-      senderUserId: 1,
-      senderName: 'Dr. Mehmet Kaya',
-      senderRole: 'dietitian',
-      content: 'Harika! Protein alımını artırmaya devam et. Adımlarını da takip ediyorum.',
-      createdAt: new Date(Date.now() - 2400000).toISOString(),
-      isRead: true,
-    },
-  ]);
+  const insets = useSafeAreaInsets();
+  const [role, setRole] = useState<'dietitian' | 'client'>('client');
+  const [userName, setUserName] = useState('Ben');
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
-  const scrollViewRef = useRef<ScrollView>(null);
+  const [allMessages, setAllMessages] = useState<Record<string, Message[]>>(INITIAL_MESSAGES);
+  const flatListRef = useRef<FlatList>(null);
+
+  useEffect(() => { loadUser(); }, []);
 
   useEffect(() => {
-    // Scroll to bottom when messages change
-    setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-  }, [messages]);
+    if (selectedContact) {
+      setMessages(allMessages[selectedContact.id] ?? []);
+    }
+  }, [selectedContact, allMessages]);
 
-  const handleSendMessage = async () => {
-    if (!messageText.trim()) return;
+  const loadUser = async () => {
+    const user = await getUserRegistration();
+    setRole(user?.role ?? 'client');
+    setUserName(user?.name ?? 'Ben');
 
-    try {
-      setIsLoading(true);
-
-      // Add message to list
-      const newMessage: Message = {
-        id: messages.length + 1,
-        senderUserId: 2,
-        senderName: 'Ayşe Yılmaz',
-        senderRole: 'client',
-        content: messageText,
-        createdAt: new Date().toISOString(),
-        isRead: false,
-      };
-
-      setMessages([...messages, newMessage]);
-      setMessageText('');
-      setIsTyping(false);
-    } catch (error) {
-      console.error('Error sending message:', error);
-    } finally {
-      setIsLoading(false);
+    // Kayıtlı mesajları yükle
+    const saved = await AsyncStorage.getItem(MESSAGES_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      setAllMessages({ ...INITIAL_MESSAGES, ...parsed });
     }
   };
 
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
+  const contacts = role === 'dietitian' ? DIETITIAN_CONTACTS : CLIENT_CONTACTS;
 
-    if (diffMins < 1) return 'Az önce';
-    if (diffMins < 60) return `${diffMins}m`;
-    if (diffHours < 24) return `${diffHours}h`;
-    if (diffDays < 7) return `${diffDays}d`;
-
-    return date.toLocaleDateString('tr-TR');
+  const sendMessage = async () => {
+    if (!messageText.trim() || !selectedContact) return;
+    const newMsg: Message = {
+      id: Date.now().toString(),
+      senderId: 'me',
+      senderName: userName,
+      content: messageText.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    const updated = { ...allMessages, [selectedContact.id]: [...(allMessages[selectedContact.id] ?? []), newMsg] };
+    setAllMessages(updated);
+    setMessageText('');
+    await AsyncStorage.setItem(MESSAGES_KEY, JSON.stringify(updated));
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
-  const renderMessage = ({ item }: { item: Message }) => {
-    const isOwnMessage = item.senderRole === 'client';
+  const formatTime = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+  };
 
+  // Kişi listesi
+  if (!selectedContact) {
     return (
-      <View
-        className={`flex-row gap-2 mb-3 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}
-      >
-        {!isOwnMessage && (
-          <View className="w-8 h-8 rounded-full bg-primary/20 items-center justify-center">
-            <Text className="text-xs font-bold text-primary">D</Text>
-          </View>
-        )}
-
-        <View
-          className={`max-w-xs rounded-lg p-3 ${
-            isOwnMessage
-              ? 'bg-primary'
-              : 'bg-surface border border-border'
-          }`}
-        >
-          <Text
-            className={`text-sm ${
-              isOwnMessage ? 'text-white' : 'text-foreground'
-            }`}
-          >
-            {item.content}
+      <ScreenContainer>
+        <BackButton title="💬 Mesajlar" />
+        <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
+          <Text style={{ fontSize: 13, color: colors.muted }}>
+            {role === 'client'
+              ? 'Diyetisyeninizle mesajlaşın'
+              : 'Danışanlarınızla mesajlaşın'}
           </Text>
-          <Text
-            className={`text-xs mt-1 ${
-              isOwnMessage ? 'text-white/70' : 'text-muted'
-            }`}
-          >
-            {formatTime(item.createdAt)}
-          </Text>
-        </View>
-
-        {isOwnMessage && (
-          <View className="w-8 h-8 rounded-full bg-primary items-center justify-center">
-            <Text className="text-xs font-bold text-white">A</Text>
-          </View>
-        )}
-      </View>
+          {contacts.map(contact => {
+            const contactMessages = allMessages[contact.id] ?? [];
+            const unread = contactMessages.filter(m => m.senderId !== 'me').length > 0 ? 1 : 0;
+            const last = contactMessages[contactMessages.length - 1];
+            return (
+              <TouchableOpacity key={contact.id} onPress={() => setSelectedContact(contact)}
+                style={{
+                  backgroundColor: colors.surface, borderRadius: 14, padding: 16,
+                  borderWidth: 1, borderColor: colors.border,
+                  flexDirection: 'row', alignItems: 'center', gap: 12,
+                }}>
+                <View style={{
+                  width: 50, height: 50, borderRadius: 25,
+                  backgroundColor: contact.role === 'dietitian' ? colors.primary : colors.primary + '40',
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Text style={{ fontSize: 22 }}>
+                    {contact.role === 'dietitian' ? '👨‍⚕️' : '👤'}
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: colors.foreground }}>
+                    {contact.name}
+                  </Text>
+                  <Text style={{ fontSize: 13, color: colors.muted }} numberOfLines={1}>
+                    {last?.content ?? 'Henüz mesaj yok'}
+                  </Text>
+                </View>
+                {unread > 0 && (
+                  <View style={{
+                    backgroundColor: colors.primary, borderRadius: 10,
+                    minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
+                  }}>
+                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{unread}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </ScreenContainer>
     );
-  };
+  }
+
+  // Mesajlaşma ekranı
+  const bottomOffset = insets.bottom + 60; // tab bar yüksekliği
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      className="flex-1"
-    >
-      <ScreenContainer className="p-4">
-        {/* Header */}
-        <View className="flex-row items-center justify-between mb-4 pb-4 border-b border-border">
-          <View className="flex-row items-center gap-2">
-            <Pressable onPress={() => router.back()}>
-              <Text className="text-primary font-semibold">←</Text>
-            </Pressable>
-            <View>
-              <Text className="text-lg font-bold text-foreground">
-                {dietitianName || 'Dr. Mehmet Kaya'}
-              </Text>
-              <Text className="text-xs text-muted">Çevrimiçi</Text>
-            </View>
-          </View>
-
-          <Pressable>
-            <Text className="text-xl">⋯</Text>
-          </Pressable>
-        </View>
-
-        {/* Messages */}
-        <ScrollView
-          ref={scrollViewRef}
-          className="flex-1 mb-4"
-          contentContainerStyle={{ gap: 8 }}
-          showsVerticalScrollIndicator={false}
-        >
-          {messages.map((msg, index) => (
-            <View key={msg.id}>
-              {renderMessage({ item: msg })}
-            </View>
-          ))}
-
-          {isTyping && (
-            <View className="flex-row gap-2 mb-3">
-              <View className="w-8 h-8 rounded-full bg-primary/20 items-center justify-center">
-                <Text className="text-xs font-bold text-primary">D</Text>
+    <ScreenContainer>
+      <BackButton title={selectedContact.name} onBack={() => setSelectedContact(null)} />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={m => m.id}
+          contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: 16 }}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+          ListEmptyComponent={
+            <Text style={{ color: colors.muted, textAlign: 'center', marginTop: 40 }}>
+              Henüz mesaj yok. İlk mesajı gönderin!
+            </Text>
+          }
+          renderItem={({ item }) => {
+            const isMe = item.senderId === 'me';
+            return (
+              <View style={{ alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                {!isMe && (
+                  <Text style={{ fontSize: 11, color: colors.muted, marginBottom: 2, marginLeft: 4 }}>
+                    {item.senderName}
+                  </Text>
+                )}
+                <View style={{
+                  maxWidth: '80%', padding: 12, borderRadius: 16,
+                  backgroundColor: isMe ? colors.primary : colors.surface,
+                  borderWidth: isMe ? 0 : 1, borderColor: colors.border,
+                  borderBottomRightRadius: isMe ? 4 : 16,
+                  borderBottomLeftRadius: isMe ? 16 : 4,
+                }}>
+                  <Text style={{ color: isMe ? '#fff' : colors.foreground, fontSize: 15, lineHeight: 20 }}>
+                    {item.content}
+                  </Text>
+                  <Text style={{ color: isMe ? 'rgba(255,255,255,0.7)' : colors.muted, fontSize: 10, marginTop: 4, textAlign: 'right' }}>
+                    {formatTime(item.createdAt)}
+                  </Text>
+                </View>
               </View>
-              <View className="bg-surface border border-border rounded-lg p-3 flex-row gap-1 items-center">
-                <View className="w-2 h-2 rounded-full bg-muted animate-bounce" />
-                <View className="w-2 h-2 rounded-full bg-muted animate-bounce" style={{ animationDelay: '0.1s' }} />
-                <View className="w-2 h-2 rounded-full bg-muted animate-bounce" style={{ animationDelay: '0.2s' }} />
-              </View>
-            </View>
-          )}
-        </ScrollView>
+            );
+          }}
+        />
 
-        {/* Input Area */}
-        <View className="flex-row gap-2 items-end">
-          <Pressable
-            style={({ pressed }) => [
-              {
-                opacity: pressed ? 0.7 : 1,
-                width: 36,
-                height: 36,
-                borderRadius: 8,
-                backgroundColor: colors.surface,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 1,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text className="text-lg">📎</Text>
-          </Pressable>
-
+        {/* Mesaj giriş alanı - tab bar'ın üzerinde */}
+        <View style={{
+          flexDirection: 'row', alignItems: 'flex-end', gap: 8,
+          paddingHorizontal: 12, paddingTop: 10,
+          paddingBottom: Math.max(insets.bottom, 12) + 4,
+          borderTopWidth: 1, borderTopColor: colors.border,
+          backgroundColor: colors.background,
+        }}>
           <TextInput
+            value={messageText}
+            onChangeText={setMessageText}
             placeholder="Mesaj yazın..."
             placeholderTextColor={colors.muted}
-            value={messageText}
-            onChangeText={(text) => {
-              setMessageText(text);
-              setIsTyping(text.length > 0);
-            }}
             multiline
-            className="flex-1 bg-surface border border-border rounded-lg p-3 text-foreground"
+            maxLength={500}
             style={{
-              minHeight: 40,
-              maxHeight: 100,
+              flex: 1,
+              minHeight: 44,
+              maxHeight: 120,
+              backgroundColor: colors.surface,
+              borderRadius: 22,
+              paddingHorizontal: 16,
               paddingVertical: 10,
+              color: colors.foreground,
+              fontSize: 15,
+              borderWidth: 1,
+              borderColor: colors.border,
             }}
           />
-
-          <Pressable
-            onPress={handleSendMessage}
-            disabled={!messageText.trim() || isLoading}
-            style={({ pressed }) => [
-              {
-                opacity: pressed || !messageText.trim() || isLoading ? 0.7 : 1,
-                width: 36,
-                height: 36,
-                borderRadius: 8,
-                backgroundColor: colors.primary,
-                alignItems: 'center',
-                justifyContent: 'center',
-              },
-            ]}
-          >
-            {isLoading ? (
-              <ActivityIndicator size="small" color="white" />
-            ) : (
-              <Text className="text-lg">📤</Text>
-            )}
-          </Pressable>
+          <TouchableOpacity
+            onPress={sendMessage}
+            disabled={!messageText.trim()}
+            style={{
+              width: 44, height: 44, borderRadius: 22,
+              backgroundColor: messageText.trim() ? colors.primary : colors.surface,
+              alignItems: 'center', justifyContent: 'center',
+              borderWidth: 1, borderColor: messageText.trim() ? colors.primary : colors.border,
+            }}>
+            <Text style={{ fontSize: 18, color: messageText.trim() ? '#fff' : colors.muted }}>→</Text>
+          </TouchableOpacity>
         </View>
-      </ScreenContainer>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </ScreenContainer>
   );
 }

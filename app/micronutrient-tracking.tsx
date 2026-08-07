@@ -1,761 +1,370 @@
-import {
-  ScrollView,
-  Text,
-  View,
-  TouchableOpacity,
-  Alert,
-  Modal,
-  TextInput,
-  ActivityIndicator,
-} from "react-native";
+import { BackButton } from "@/components/back-button";
+import { ScrollView, Text, View, TouchableOpacity, TextInput, Alert, Modal, FlatList } from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
-import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/use-colors";
 import { useState, useEffect } from "react";
-import {
-  micronutrientTrackingService,
-  type Micronutrient,
-  type MicronutrientAnalysis,
-} from "@/lib/_core/micronutrient-tracking";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getUserRegistration } from "@/lib/_core/user-registration";
+
+const MICRO_GOALS_KEY = "micronutrient_goals_v2";
+const MICRO_LOG_KEY = "micronutrient_log_v2";
+
+interface MicroGoal {
+  id: string;
+  clientId: string;
+  clientName: string;
+  nutrient: string;
+  unit: string;
+  dailyTarget: number;
+  icon: string;
+}
+
+interface MicroLog {
+  id: string;
+  clientId: string;
+  nutrientId: string;
+  nutrient: string;
+  amount: number;
+  unit: string;
+  foodSource: string;
+  date: string;
+}
+
+const NUTRIENTS = [
+  { id: "vit-c", name: "C Vitamini", unit: "mg", icon: "🍊", defaultTarget: 90, foods: ["Portakal", "Limon", "Kivi", "Çilek", "Biber", "Brokoli", "Domates"] },
+  { id: "vit-d", name: "D Vitamini", unit: "mcg", icon: "☀️", defaultTarget: 20, foods: ["Somon", "Ton balığı", "Yumurta", "Mantar", "Süt"] },
+  { id: "vit-b12", name: "B12 Vitamini", unit: "mcg", icon: "💊", defaultTarget: 2.4, foods: ["Et", "Tavuk", "Balık", "Yumurta", "Süt", "Peynir"] },
+  { id: "iron", name: "Demir", unit: "mg", icon: "🔴", defaultTarget: 18, foods: ["Kırmızı et", "Mercimek", "Ispanak", "Fasulye", "Tofu", "Susam"] },
+  { id: "calcium", name: "Kalsiyum", unit: "mg", icon: "🦴", defaultTarget: 1000, foods: ["Süt", "Peynir", "Yoğurt", "Brokoli", "Badem", "Susam"] },
+  { id: "magnesium", name: "Magnezyum", unit: "mg", icon: "⚡", defaultTarget: 400, foods: ["Kabak çekirdeği", "Badem", "Ispanak", "Avokado", "Bitter çikolata"] },
+  { id: "zinc", name: "Çinko", unit: "mg", icon: "🔵", defaultTarget: 11, foods: ["Kabak çekirdeği", "Kırmızı et", "Ceviz", "Nohut", "Yulaf"] },
+  { id: "potassium", name: "Potasyum", unit: "mg", icon: "🍌", defaultTarget: 4700, foods: ["Muz", "Patates", "Fasulye", "Avokado", "Ispanak"] },
+  { id: "omega3", name: "Omega-3", unit: "g", icon: "🐟", defaultTarget: 1.6, foods: ["Somon", "Uskumru", "Keten tohumu", "Ceviz", "Chia tohumu"] },
+  { id: "fiber", name: "Lif", unit: "g", icon: "🌾", defaultTarget: 25, foods: ["Sebze", "Meyve", "Tam tahıl", "Baklagiller", "Kuruyemiş"] },
+  { id: "folic", name: "Folik Asit", unit: "mcg", icon: "🌿", defaultTarget: 400, foods: ["Ispanak", "Mercimek", "Fasulye", "Avokado", "Brokoli"] },
+  { id: "vit-a", name: "A Vitamini", unit: "mcg", icon: "🥕", defaultTarget: 900, foods: ["Havuç", "Tatlı patates", "Ispanak", "Kayısı", "Mango"] },
+];
+
+const SAMPLE_CLIENTS = [
+  { id: "c1", name: "Ayşe Yılmaz" },
+  { id: "c2", name: "Mehmet Demir" },
+  { id: "c3", name: "Fatma Kaya" },
+];
 
 export default function MicronutrientTrackingScreen() {
-  const router = useRouter();
   const colors = useColors();
-  const [micronutrients, setMicronutrients] = useState<Micronutrient[]>([]);
-  const [analysis, setAnalysis] = useState<MicronutrientAnalysis | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "log" | "targets">(
-    "overview"
-  );
-  const [selectedMicro, setSelectedMicro] = useState<Micronutrient | null>(null);
+  const [role, setRole] = useState<"dietitian" | "client">("client");
+  const [goals, setGoals] = useState<MicroGoal[]>([]);
+  const [logs, setLogs] = useState<MicroLog[]>([]);
+  const [selectedClient, setSelectedClient] = useState(SAMPLE_CLIENTS[0]);
+  const [activeTab, setActiveTab] = useState<"overview" | "log" | "goals">("overview");
   const [showLogModal, setShowLogModal] = useState(false);
-  const [showTargetModal, setShowTargetModal] = useState(false);
+  const [selectedNutrient, setSelectedNutrient] = useState(NUTRIENTS[0]);
   const [logAmount, setLogAmount] = useState("");
-  const [logSource, setLogSource] = useState("");
-  const [targetAmount, setTargetAmount] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [searchFood, setSearchFood] = useState("");
+  const [selectedFood, setSelectedFood] = useState("");
 
-  const userId = "user-1";
-  const stats = micronutrientTrackingService.getStatistics();
+  useEffect(() => { loadData(); }, []);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = () => {
-    const allMicros = micronutrientTrackingService.getAllMicronutrients();
-    setMicronutrients(allMicros);
-
-    const userAnalysis = micronutrientTrackingService.analyzeIntake(userId, "daily");
-    setAnalysis(userAnalysis);
+  const loadData = async () => {
+    const user = await getUserRegistration();
+    setRole(user?.role ?? "client");
+    const savedGoals = await AsyncStorage.getItem(MICRO_GOALS_KEY);
+    if (savedGoals) setGoals(JSON.parse(savedGoals));
+    else {
+      // Varsayılan hedefleri yükle
+      const defaults = NUTRIENTS.map(n => ({
+        id: n.id,
+        clientId: "c1",
+        clientName: "Ayşe Yılmaz",
+        nutrient: n.name,
+        unit: n.unit,
+        dailyTarget: n.defaultTarget,
+        icon: n.icon,
+      }));
+      setGoals(defaults);
+      await AsyncStorage.setItem(MICRO_GOALS_KEY, JSON.stringify(defaults));
+    }
+    const savedLogs = await AsyncStorage.getItem(MICRO_LOG_KEY);
+    if (savedLogs) setLogs(JSON.parse(savedLogs));
   };
 
-  const handleLogMicronutrient = async () => {
-    if (!selectedMicro || !logAmount.trim() || !logSource.trim()) {
-      Alert.alert("Hata", "Lütfen tüm alanları doldurunuz");
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      micronutrientTrackingService.logMicronutrient(
-        userId,
-        selectedMicro.type,
-        parseFloat(logAmount),
-        logSource
-      );
-
-      Alert.alert("Başarılı", `${selectedMicro.name} kaydedildi`);
-      setLogAmount("");
-      setLogSource("");
-      setShowLogModal(false);
-      loadData();
-    } catch (error) {
-      Alert.alert("Hata", "Kayıt sırasında bir hata oluştu");
-    } finally {
-      setIsLoading(false);
-    }
+  const saveGoals = async (list: MicroGoal[]) => {
+    setGoals(list);
+    await AsyncStorage.setItem(MICRO_GOALS_KEY, JSON.stringify(list));
   };
 
-  const handleSetTarget = async () => {
-    if (!selectedMicro || !targetAmount.trim()) {
-      Alert.alert("Hata", "Lütfen hedef miktarı giriniz");
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      micronutrientTrackingService.setDailyTarget(
-        userId,
-        selectedMicro.type,
-        parseFloat(targetAmount),
-        "high"
-      );
-
-      Alert.alert("Başarılı", `${selectedMicro.name} hedefi belirlendi`);
-      setTargetAmount("");
-      setShowTargetModal(false);
-      loadData();
-    } catch (error) {
-      Alert.alert("Hata", "Hedef belirlenirken bir hata oluştu");
-    } finally {
-      setIsLoading(false);
-    }
+  const addLog = async () => {
+    if (!logAmount || isNaN(Number(logAmount))) { Alert.alert("Hata", "Geçerli miktar girin"); return; }
+    const today = new Date().toISOString().split("T")[0];
+    const log: MicroLog = {
+      id: Date.now().toString(),
+      clientId: role === "dietitian" ? selectedClient.id : "c1",
+      nutrientId: selectedNutrient.id,
+      nutrient: selectedNutrient.name,
+      amount: Number(logAmount),
+      unit: selectedNutrient.unit,
+      foodSource: selectedFood || "Manuel giriş",
+      date: today,
+    };
+    const updated = [...logs, log];
+    setLogs(updated);
+    await AsyncStorage.setItem(MICRO_LOG_KEY, JSON.stringify(updated));
+    setLogAmount(""); setSelectedFood(""); setShowLogModal(false);
+    Alert.alert("Kaydedildi ✅", `${selectedNutrient.name}: ${log.amount}${log.unit} eklendi.`);
   };
 
-  const getStatusColor = (status: string): string => {
-    switch (status) {
-      case "deficient":
-        return colors.error;
-      case "adequate":
-        return colors.success;
-      case "excess":
-        return colors.warning;
-      default:
-        return colors.muted;
+  const setGoalTarget = async (nutrientId: string, target: number) => {
+    const clientId = selectedClient.id;
+    const exists = goals.find(g => g.id === nutrientId && g.clientId === clientId);
+    const nutrient = NUTRIENTS.find(n => n.id === nutrientId)!;
+    let updated: MicroGoal[];
+    if (exists) {
+      updated = goals.map(g => g.id === nutrientId && g.clientId === clientId ? { ...g, dailyTarget: target } : g);
+    } else {
+      updated = [...goals, {
+        id: nutrientId, clientId, clientName: selectedClient.name,
+        nutrient: nutrient.name, unit: nutrient.unit, dailyTarget: target, icon: nutrient.icon,
+      }];
     }
+    await saveGoals(updated);
   };
 
-  const getStatusLabel = (status: string): string => {
-    switch (status) {
-      case "deficient":
-        return "Eksik";
-      case "adequate":
-        return "Yeterli";
-      case "excess":
-        return "Fazla";
-      default:
-        return "Bilinmiyor";
-    }
+  const today = new Date().toISOString().split("T")[0];
+  const clientId = role === "dietitian" ? selectedClient.id : "c1";
+  const clientGoals = goals.filter(g => g.clientId === clientId);
+  const todayLogs = logs.filter(l => l.date === today && l.clientId === clientId);
+
+  const getTodayTotal = (nutrientId: string) =>
+    todayLogs.filter(l => l.nutrientId === nutrientId).reduce((s, l) => s + l.amount, 0);
+
+  const getPct = (nutrientId: string) => {
+    const goal = clientGoals.find(g => g.id === nutrientId);
+    if (!goal || goal.dailyTarget === 0) return 0;
+    return Math.min((getTodayTotal(nutrientId) / goal.dailyTarget) * 100, 100);
   };
+
+  const filteredFoods = selectedNutrient.foods.filter(f =>
+    f.toLowerCase().includes(searchFood.toLowerCase())
+  );
 
   return (
-    <ScreenContainer className="p-4">
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        <View className="gap-4">
-          {/* Header */}
-          <View className="flex-row items-center justify-between mb-2">
-            <Text className="text-3xl font-bold text-foreground flex-1">💊 Mikro Besinler</Text>
-            <TouchableOpacity
-              onPress={() => router.back()}
-              style={{
-                paddingVertical: 8,
-                paddingHorizontal: 12,
-                borderRadius: 6,
-                backgroundColor: colors.surface,
-                borderWidth: 1,
-                borderColor: colors.border,
-              }}
-            >
-              <Text style={{ color: colors.foreground, fontWeight: "600" }}>← Geri</Text>
-            </TouchableOpacity>
-          </View>
+    <ScreenContainer>
+      <BackButton title="🔬 Mikro Besin Takibi" />
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 32 }}>
 
-          <Text className="text-sm text-muted mb-4">
-            Vitamin, mineral ve lif alımınızı takip edin ve hedefler belirleyin.
-          </Text>
-
-          {/* Overall Score */}
-          {analysis && (
-            <View
-              style={{
-                backgroundColor: colors.primary + "15",
-                borderRadius: 10,
-                padding: 16,
-                borderWidth: 1,
-                borderColor: colors.primary + "30",
-              }}
-            >
-              <View className="flex-row items-center justify-between mb-2">
-                <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 14 }}>
-                  Günlük Puan
-                </Text>
-                <Text
-                  style={{
-                    color: colors.primary,
-                    fontWeight: "700",
-                    fontSize: 32,
-                  }}
-                >
-                  {analysis.overallScore}
-                </Text>
-              </View>
-
-              <View
+        {/* Tabs */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {[
+              { key: "overview", label: "📊 Özet" },
+              { key: "log", label: "➕ Kayıt Ekle" },
+              { key: "goals", label: role === "dietitian" ? "🎯 Hedef Belirle" : "🎯 Hedeflerim" },
+            ].map(tab => (
+              <TouchableOpacity key={tab.key} onPress={() => setActiveTab(tab.key as any)}
                 style={{
-                  height: 8,
-                  backgroundColor: colors.surface,
-                  borderRadius: 4,
-                  overflow: "hidden",
-                }}
-              >
-                <View
-                  style={{
-                    height: "100%",
-                    width: `${analysis.overallScore}%`,
-                    backgroundColor: colors.primary,
-                  }}
-                />
-              </View>
-
-              <View className="flex-row items-center justify-between gap-2 mt-3">
-                <View className="flex-1">
-                  <Text style={{ color: colors.muted, fontSize: 11 }}>Eksik</Text>
-                  <Text
-                    style={{
-                      color: colors.error,
-                      fontWeight: "700",
-                      fontSize: 16,
-                    }}
-                  >
-                    {analysis.deficiencies.length}
-                  </Text>
-                </View>
-                <View className="flex-1">
-                  <Text style={{ color: colors.muted, fontSize: 11 }}>Yeterli</Text>
-                  <Text
-                    style={{
-                      color: colors.success,
-                      fontWeight: "700",
-                      fontSize: 16,
-                    }}
-                  >
-                    {analysis.micronutrients.filter((m) => m.status === "adequate").length}
-                  </Text>
-                </View>
-                <View className="flex-1">
-                  <Text style={{ color: colors.muted, fontSize: 11 }}>Fazla</Text>
-                  <Text
-                    style={{
-                      color: colors.warning,
-                      fontWeight: "700",
-                      fontSize: 16,
-                    }}
-                  >
-                    {analysis.excesses.length}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          )}
-
-          {/* Tabs */}
-          <View className="flex-row gap-2 bg-surface rounded-lg p-1">
-            {["overview", "log", "targets"].map((tab) => (
-              <TouchableOpacity
-                key={tab}
-                onPress={() =>
-                  setActiveTab(tab as "overview" | "log" | "targets")
-                }
-                style={{
-                  flex: 1,
-                  paddingVertical: 10,
-                  borderRadius: 6,
-                  backgroundColor: activeTab === tab ? colors.primary : "transparent",
-                }}
-              >
-                <Text
-                  style={{
-                    textAlign: "center",
-                    color: activeTab === tab ? "#ffffff" : colors.foreground,
-                    fontWeight: "600",
-                    fontSize: 12,
-                  }}
-                >
-                  {tab === "overview"
-                    ? "Genel"
-                    : tab === "log"
-                      ? "Kayıt"
-                      : "Hedefler"}
+                  paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20,
+                  backgroundColor: activeTab === tab.key ? colors.primary : colors.surface,
+                  borderWidth: 1, borderColor: activeTab === tab.key ? colors.primary : colors.border,
+                }}>
+                <Text style={{ color: activeTab === tab.key ? "#fff" : colors.foreground, fontWeight: "600" }}>
+                  {tab.label}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
+        </ScrollView>
 
-          {/* Overview Tab */}
-          {activeTab === "overview" && analysis && (
-            <View className="gap-3">
-              {analysis.micronutrients.map((stat) => (
-                <TouchableOpacity
-                  key={stat.type}
-                  onPress={() => {
-                    setSelectedMicro(micronutrientTrackingService.getMicronutrient(stat.type));
-                    setShowLogModal(true);
-                  }}
+        {/* Diyetisyen: danışan seçimi */}
+        {role === "dietitian" && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {SAMPLE_CLIENTS.map(c => (
+                <TouchableOpacity key={c.id} onPress={() => setSelectedClient(c)}
                   style={{
-                    backgroundColor: colors.surface,
-                    borderRadius: 10,
-                    padding: 12,
-                    borderLeftWidth: 4,
-                    borderLeftColor: getStatusColor(stat.status),
-                  }}
-                >
-                  <View className="flex-row items-center justify-between mb-2">
-                    <Text
-                      style={{
-                        fontSize: 14,
-                        fontWeight: "700",
-                        color: colors.foreground,
-                        flex: 1,
-                      }}
-                    >
-                      {stat.name}
-                    </Text>
-                    <Text
-                      style={{
-                        backgroundColor: getStatusColor(stat.status) + "20",
-                        color: getStatusColor(stat.status),
-                        paddingHorizontal: 8,
-                        paddingVertical: 4,
-                        borderRadius: 4,
-                        fontSize: 11,
-                        fontWeight: "600",
-                      }}
-                    >
-                      {getStatusLabel(stat.status)}
-                    </Text>
-                  </View>
-
-                  <View className="flex-row items-center justify-between mb-2">
-                    <Text style={{ color: colors.muted, fontSize: 12 }}>
-                      {stat.averageIntake.toFixed(1)} / {stat.target.toFixed(1)}
-                    </Text>
-                    <Text
-                      style={{
-                        color: getStatusColor(stat.status),
-                        fontWeight: "700",
-                        fontSize: 12,
-                      }}
-                    >
-                      {stat.percentage.toFixed(0)}%
-                    </Text>
-                  </View>
-
-                  <View
-                    style={{
-                      height: 6,
-                      backgroundColor: colors.surface,
-                      borderRadius: 3,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <View
-                      style={{
-                        height: "100%",
-                        width: `${Math.min(stat.percentage, 100)}%`,
-                        backgroundColor: getStatusColor(stat.status),
-                      }}
-                    />
-                  </View>
+                    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                    backgroundColor: selectedClient.id === c.id ? colors.primary : colors.surface,
+                    borderWidth: 1, borderColor: selectedClient.id === c.id ? colors.primary : colors.border,
+                  }}>
+                  <Text style={{ color: selectedClient.id === c.id ? "#fff" : colors.foreground, fontWeight: "600" }}>
+                    👤 {c.name}
+                  </Text>
                 </TouchableOpacity>
               ))}
-
-              {/* Recommendations */}
-              <View
-                style={{
-                  backgroundColor: colors.primary + "10",
-                  borderRadius: 10,
-                  padding: 12,
-                  borderLeftWidth: 4,
-                  borderLeftColor: colors.primary,
-                }}
-              >
-                <Text style={{ color: colors.foreground, fontWeight: "600", marginBottom: 8 }}>
-                  💡 Öneriler
-                </Text>
-                {analysis.recommendations.map((rec, index) => (
-                  <Text
-                    key={index}
-                    style={{
-                      color: colors.muted,
-                      fontSize: 12,
-                      marginBottom: 6,
-                      lineHeight: 18,
-                    }}
-                  >
-                    • {rec}
-                  </Text>
-                ))}
-              </View>
             </View>
-          )}
+          </ScrollView>
+        )}
 
-          {/* Log Tab */}
-          {activeTab === "log" && (
-            <View className="gap-3">
-              <TouchableOpacity
-                onPress={() => setShowLogModal(true)}
-                style={{
-                  backgroundColor: colors.primary,
-                  borderRadius: 8,
-                  paddingVertical: 12,
-                }}
-              >
-                <Text style={{ color: "#ffffff", fontWeight: "600", textAlign: "center" }}>
-                  + Mikro Besin Kaydet
-                </Text>
-              </TouchableOpacity>
-
-              <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 14 }}>
-                Kategoriler
-              </Text>
-
-              {["vitamin", "mineral", "other"].map((category) => {
-                const categoryMicros = micronutrients.filter((m) => m.category === category);
-                return (
-                  <View key={category}>
-                    <Text
-                      style={{
-                        color: colors.muted,
-                        fontSize: 12,
-                        marginBottom: 6,
-                        textTransform: "capitalize",
-                      }}
-                    >
-                      {category === "vitamin"
-                        ? "Vitaminler"
-                        : category === "mineral"
-                          ? "Mineraller"
-                          : "Diğer"}
+        {/* ÖZET */}
+        {activeTab === "overview" && (
+          <>
+            <Text style={{ color: colors.muted, fontSize: 13 }}>Bugünkü mikro besin alımı</Text>
+            {clientGoals.map(goal => {
+              const total = getTodayTotal(goal.id);
+              const pct = getPct(goal.id);
+              return (
+                <View key={goal.id} style={{
+                  backgroundColor: colors.surface, borderRadius: 12, padding: 14, gap: 8,
+                  borderWidth: 1, borderColor: pct >= 100 ? "#22c55e" : colors.border,
+                }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={{ fontWeight: "700", color: colors.foreground }}>
+                      {goal.icon} {goal.nutrient}
                     </Text>
-                    {categoryMicros.map((micro) => (
-                      <TouchableOpacity
-                        key={micro.type}
-                        onPress={() => {
-                          setSelectedMicro(micro);
-                          setShowLogModal(true);
-                        }}
-                        style={{
-                          backgroundColor: colors.surface,
-                          borderRadius: 8,
-                          padding: 10,
-                          marginBottom: 6,
-                          borderLeftWidth: 3,
-                          borderLeftColor: colors.primary,
-                        }}
-                      >
-                        <View className="flex-row items-center justify-between">
-                          <View className="flex-row items-center gap-2 flex-1">
-                            <Text style={{ fontSize: 18 }}>{micro.icon}</Text>
-                            <Text
-                              style={{
-                                color: colors.foreground,
-                                fontWeight: "600",
-                                fontSize: 12,
-                              }}
-                            >
-                              {micro.name}
-                            </Text>
-                          </View>
-                          <Text style={{ color: colors.muted, fontSize: 11 }}>
-                            {micro.unit}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                );
-              })}
-            </View>
-          )}
-
-          {/* Targets Tab */}
-          {activeTab === "targets" && (
-            <View className="gap-3">
-              <TouchableOpacity
-                onPress={() => setShowTargetModal(true)}
-                style={{
-                  backgroundColor: colors.primary,
-                  borderRadius: 8,
-                  paddingVertical: 12,
-                }}
-              >
-                <Text style={{ color: "#ffffff", fontWeight: "600", textAlign: "center" }}>
-                  + Hedef Belirle
-                </Text>
-              </TouchableOpacity>
-
-              <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 14 }}>
-                Önerilen Günlük Hedefler
-              </Text>
-
-              {micronutrients.map((micro) => (
-                <View
-                  key={micro.type}
-                  style={{
-                    backgroundColor: colors.surface,
-                    borderRadius: 8,
-                    padding: 10,
-                    marginBottom: 6,
-                  }}
-                >
-                  <View className="flex-row items-center justify-between mb-2">
-                    <View className="flex-row items-center gap-2 flex-1">
-                      <Text style={{ fontSize: 18 }}>{micro.icon}</Text>
-                      <View className="flex-1">
-                        <Text
-                          style={{
-                            color: colors.foreground,
-                            fontWeight: "600",
-                            fontSize: 12,
-                          }}
-                        >
-                          {micro.name}
-                        </Text>
-                        <Text style={{ color: colors.muted, fontSize: 10, marginTop: 2 }}>
-                          {micro.benefits[0]}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  <View className="flex-row items-center justify-between">
-                    <Text style={{ color: colors.muted, fontSize: 11 }}>
-                      Hedef: {micro.dailyRecommendation} {micro.unit}
+                    <Text style={{ color: pct >= 100 ? "#22c55e" : colors.primary, fontWeight: "700" }}>
+                      {total}/{goal.dailyTarget} {goal.unit}
                     </Text>
-                    <TouchableOpacity
-                      onPress={() => {
-                        setSelectedMicro(micro);
-                        setTargetAmount(micro.dailyRecommendation.toString());
-                        setShowTargetModal(true);
-                      }}
-                      style={{
-                        paddingHorizontal: 8,
-                        paddingVertical: 4,
-                        borderRadius: 4,
-                        backgroundColor: colors.primary + "20",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: colors.primary,
-                          fontWeight: "600",
-                          fontSize: 10,
-                        }}
-                      >
-                        Düzenle
-                      </Text>
-                    </TouchableOpacity>
                   </View>
+                  <View style={{ height: 8, backgroundColor: colors.border, borderRadius: 4 }}>
+                    <View style={{
+                      height: 8, borderRadius: 4, width: `${pct}%`,
+                      backgroundColor: pct >= 100 ? "#22c55e" : pct >= 60 ? "#f97316" : "#ef4444",
+                    }} />
+                  </View>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>{pct.toFixed(0)}% tamamlandı</Text>
                 </View>
+              );
+            })}
+
+            {clientGoals.length === 0 && (
+              <Text style={{ color: colors.muted, textAlign: "center" }}>
+                {role === "dietitian" ? "Bu danışan için hedef belirlenmedi." : "Diyetisyeniniz henüz hedef belirlemedi."}
+              </Text>
+            )}
+          </>
+        )}
+
+        {/* KAYIT EKLE */}
+        {activeTab === "log" && (
+          <>
+            <Text style={{ color: colors.muted, fontSize: 13 }}>Yediğiniz besin kaynağını seçin ve miktarını girin</Text>
+
+            {/* Besin seçimi */}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {NUTRIENTS.map(n => (
+                <TouchableOpacity key={n.id} onPress={() => { setSelectedNutrient(n); setSearchFood(""); setSelectedFood(""); setShowLogModal(true); }}
+                  style={{
+                    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
+                    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+                    flexDirection: "row", alignItems: "center", gap: 6,
+                  }}>
+                  <Text style={{ fontSize: 18 }}>{n.icon}</Text>
+                  <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 13 }}>{n.name}</Text>
+                </TouchableOpacity>
               ))}
             </View>
-          )}
-        </View>
+
+            {/* Bugünkü Kayıtlar */}
+            {todayLogs.length > 0 && (
+              <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border, gap: 8 }}>
+                <Text style={{ fontWeight: "700", color: colors.foreground }}>📋 Bugünkü Kayıtlar</Text>
+                {todayLogs.map(log => (
+                  <View key={log.id} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                    <Text style={{ color: colors.foreground }}>{log.nutrient} — {log.foodSource}</Text>
+                    <Text style={{ color: colors.primary, fontWeight: "600" }}>{log.amount}{log.unit}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </>
+        )}
+
+        {/* HEDEFLER */}
+        {activeTab === "goals" && (
+          <>
+            {role === "dietitian" && (
+              <Text style={{ color: colors.muted, fontSize: 13 }}>
+                {selectedClient.name} için günlük hedefleri belirleyin
+              </Text>
+            )}
+            {NUTRIENTS.map(n => {
+              const goal = clientGoals.find(g => g.id === n.id);
+              const [tempVal, setTempVal] = useState(String(goal?.dailyTarget ?? n.defaultTarget));
+              return (
+                <View key={n.id} style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border, flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <Text style={{ fontSize: 24 }}>{n.icon}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: "700", color: colors.foreground }}>{n.name}</Text>
+                    <Text style={{ color: colors.muted, fontSize: 12 }}>Hedef: {goal?.dailyTarget ?? n.defaultTarget} {n.unit}/gün</Text>
+                  </View>
+                  {role === "dietitian" && (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <TextInput
+                        value={tempVal}
+                        onChangeText={setTempVal}
+                        keyboardType="numeric"
+                        style={{
+                          borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+                          padding: 6, color: colors.foreground, backgroundColor: colors.background,
+                          width: 70, textAlign: "center",
+                        }}
+                      />
+                      <TouchableOpacity onPress={() => setGoalTarget(n.id, Number(tempVal))}
+                        style={{ paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.primary }}>
+                        <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>Kaydet</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </>
+        )}
       </ScrollView>
 
-      {/* Log Modal */}
+      {/* Kayıt Modal */}
       <Modal visible={showLogModal} animationType="slide" transparent>
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.5)",
-            justifyContent: "flex-end",
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: colors.background,
-              borderTopLeftRadius: 20,
-              borderTopRightRadius: 20,
-              padding: 20,
-              paddingBottom: 40,
-            }}
-          >
-            {selectedMicro && (
-              <View className="gap-4">
-                <View className="flex-row items-center justify-between mb-2">
-                  <Text
-                    style={{
-                      fontSize: 18,
-                      fontWeight: "700",
-                      color: colors.foreground,
-                    }}
-                  >
-                    {selectedMicro.icon} {selectedMicro.name} Kaydet
-                  </Text>
-                  <TouchableOpacity onPress={() => setShowLogModal(false)}>
-                    <Text style={{ fontSize: 20, color: colors.muted }}>✕</Text>
-                  </TouchableOpacity>
-                </View>
+        <View style={{ flex: 1, backgroundColor: "#00000080", justifyContent: "flex-end" }}>
+          <View style={{ backgroundColor: colors.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 14, maxHeight: "70%" }}>
+            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.foreground }}>
+              {selectedNutrient.icon} {selectedNutrient.name} Ekle
+            </Text>
 
-                <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 8 }}>
-                  {selectedMicro.benefits[0]}
-                </Text>
-
-                <TextInput
-                  placeholder={`Miktar (${selectedMicro.unit})`}
-                  value={logAmount}
-                  onChangeText={setLogAmount}
-                  keyboardType="decimal-pad"
-                  style={{
-                    backgroundColor: colors.surface,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                    borderRadius: 8,
-                    paddingHorizontal: 12,
-                    paddingVertical: 10,
-                    color: colors.foreground,
-                    marginBottom: 12,
-                  }}
-                  placeholderTextColor={colors.muted}
-                />
-
-                <TextInput
-                  placeholder="Kaynak (gıda adı)"
-                  value={logSource}
-                  onChangeText={setLogSource}
-                  style={{
-                    backgroundColor: colors.surface,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                    borderRadius: 8,
-                    paddingHorizontal: 12,
-                    paddingVertical: 10,
-                    color: colors.foreground,
-                    marginBottom: 16,
-                  }}
-                  placeholderTextColor={colors.muted}
-                />
-
-                <View className="flex-row gap-2">
-                  <TouchableOpacity
-                    onPress={() => setShowLogModal(false)}
-                    style={{
-                      flex: 1,
-                      paddingVertical: 12,
-                      borderRadius: 8,
-                      backgroundColor: colors.surface,
-                      borderWidth: 1,
-                      borderColor: colors.border,
-                    }}
-                  >
-                    <Text style={{ color: colors.foreground, fontWeight: "600", textAlign: "center" }}>
-                      İptal
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={handleLogMicronutrient}
-                    disabled={isLoading}
-                    style={{
-                      flex: 1,
-                      paddingVertical: 12,
-                      borderRadius: 8,
-                      backgroundColor: colors.primary,
-                      opacity: isLoading ? 0.6 : 1,
-                    }}
-                  >
-                    {isLoading ? (
-                      <ActivityIndicator color="#ffffff" size="small" />
-                    ) : (
-                      <Text style={{ color: "#ffffff", fontWeight: "600", textAlign: "center" }}>
-                        Kaydet
+            {/* Besin Kaynağı Arama */}
+            <View style={{ gap: 8 }}>
+              <Text style={{ fontWeight: "600", color: colors.foreground }}>🍽️ Besin Kaynağı Seç</Text>
+              <TextInput value={searchFood} onChangeText={setSearchFood}
+                placeholder="Yemek ara..." placeholderTextColor={colors.muted}
+                style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.surface }} />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {filteredFoods.map(food => (
+                    <TouchableOpacity key={food} onPress={() => setSelectedFood(food)}
+                      style={{
+                        paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
+                        backgroundColor: selectedFood === food ? colors.primary : colors.surface,
+                        borderWidth: 1, borderColor: selectedFood === food ? colors.primary : colors.border,
+                      }}>
+                      <Text style={{ color: selectedFood === food ? "#fff" : colors.foreground, fontWeight: "600", fontSize: 13 }}>
+                        {food}
                       </Text>
-                    )}
-                  </TouchableOpacity>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              </View>
-            )}
-          </View>
-        </View>
-      </Modal>
+              </ScrollView>
+            </View>
 
-      {/* Target Modal */}
-      <Modal visible={showTargetModal} animationType="slide" transparent>
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.5)",
-            justifyContent: "flex-end",
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: colors.background,
-              borderTopLeftRadius: 20,
-              borderTopRightRadius: 20,
-              padding: 20,
-              paddingBottom: 40,
-            }}
-          >
-            {selectedMicro && (
-              <View className="gap-4">
-                <View className="flex-row items-center justify-between mb-2">
-                  <Text
-                    style={{
-                      fontSize: 18,
-                      fontWeight: "700",
-                      color: colors.foreground,
-                    }}
-                  >
-                    {selectedMicro.icon} Hedef Belirle
-                  </Text>
-                  <TouchableOpacity onPress={() => setShowTargetModal(false)}>
-                    <Text style={{ fontSize: 20, color: colors.muted }}>✕</Text>
-                  </TouchableOpacity>
-                </View>
+            {/* Miktar */}
+            <View style={{ gap: 6 }}>
+              <Text style={{ fontWeight: "600", color: colors.foreground }}>
+                Miktar ({selectedNutrient.unit})
+              </Text>
+              <TextInput value={logAmount} onChangeText={setLogAmount}
+                placeholder={`${selectedNutrient.defaultTarget} ${selectedNutrient.unit}`}
+                keyboardType="numeric" placeholderTextColor={colors.muted}
+                style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.foreground, backgroundColor: colors.surface, fontSize: 16 }} />
+            </View>
 
-                <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 8 }}>
-                  {selectedMicro.name} için günlük hedef miktarını belirleyin
-                </Text>
-
-                <TextInput
-                  placeholder={`Hedef (${selectedMicro.unit})`}
-                  value={targetAmount}
-                  onChangeText={setTargetAmount}
-                  keyboardType="decimal-pad"
-                  style={{
-                    backgroundColor: colors.surface,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                    borderRadius: 8,
-                    paddingHorizontal: 12,
-                    paddingVertical: 10,
-                    color: colors.foreground,
-                    marginBottom: 16,
-                  }}
-                  placeholderTextColor={colors.muted}
-                />
-
-                <View className="flex-row gap-2">
-                  <TouchableOpacity
-                    onPress={() => setShowTargetModal(false)}
-                    style={{
-                      flex: 1,
-                      paddingVertical: 12,
-                      borderRadius: 8,
-                      backgroundColor: colors.surface,
-                      borderWidth: 1,
-                      borderColor: colors.border,
-                    }}
-                  >
-                    <Text style={{ color: colors.foreground, fontWeight: "600", textAlign: "center" }}>
-                      İptal
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={handleSetTarget}
-                    disabled={isLoading}
-                    style={{
-                      flex: 1,
-                      paddingVertical: 12,
-                      borderRadius: 8,
-                      backgroundColor: colors.primary,
-                      opacity: isLoading ? 0.6 : 1,
-                    }}
-                  >
-                    {isLoading ? (
-                      <ActivityIndicator color="#ffffff" size="small" />
-                    ) : (
-                      <Text style={{ color: "#ffffff", fontWeight: "600", textAlign: "center" }}>
-                        Belirle
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <TouchableOpacity onPress={() => setShowLogModal(false)}
+                style={{ flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+                <Text style={{ color: colors.foreground }}>İptal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={addLog}
+                style={{ flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: colors.primary }}>
+                <Text style={{ color: "#fff", fontWeight: "700" }}>✅ Kaydet</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

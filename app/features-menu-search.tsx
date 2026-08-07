@@ -13,157 +13,72 @@ export default function FeaturesMenuSearchScreen() {
   const categories = getCategories();
   const filteredFeatures = searchAndFilter(searchQuery, selectedCategory);
 
-
-
   return (
-    <ScreenContainer className="p-6">
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        <View className="gap-4">
-          {/* Header */}
-          <View className="flex-row items-center justify-between mb-2">
-            <Text className="text-3xl font-bold text-foreground">🔍 Özellikler</Text>
-            <TouchableOpacity
-              onPress={() => router.back()}
-              style={{
-                paddingVertical: 8,
-                paddingHorizontal: 12,
-                borderRadius: 6,
-                backgroundColor: colors.surface,
-                borderWidth: 1,
-                borderColor: colors.border,
-              }}
-            >
-              <Text style={{ color: colors.foreground, fontWeight: "600" }}>← Geri</Text>
-            </TouchableOpacity>
-          </View>
+    <ScreenContainer>
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 32 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 }}>
+          <Text style={{ fontSize: 22, fontWeight: "bold", color: colors.foreground, flex: 1 }}>🔍 Özellik Ara</Text>
+          <TouchableOpacity onPress={() => router.back()}
+            style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+            <Text style={{ color: colors.foreground, fontWeight: "600" }}>← Geri</Text>
+          </TouchableOpacity>
+        </View>
 
-          {/* Search Bar */}
-          <View
-            style={{
-              borderWidth: 1,
-              borderColor: colors.border,
-              borderRadius: 8,
-              paddingHorizontal: 12,
-              backgroundColor: colors.surface,
-            }}
-          >
-            <TextInput
-              placeholder="🔍 Özellik ara..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholderTextColor={colors.muted}
-              style={{
-                paddingVertical: 10,
-                color: colors.foreground,
-              }}
-            />
-          </View>
+        {/* Arama */}
+        <TextInput
+          placeholder="Özellik ara... (örn: su, randevu, beslenme)"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholderTextColor={colors.muted}
+          style={{
+            borderWidth: 1, borderColor: colors.border, borderRadius: 10,
+            padding: 14, color: colors.foreground, backgroundColor: colors.surface, fontSize: 15,
+          }}
+        />
 
-          {/* Category Filter */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="gap-2">
-            <TouchableOpacity
-              onPress={() => setSelectedCategory("")}
+        {/* Kategoriler */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <TouchableOpacity onPress={() => setSelectedCategory("")}
               style={{
-                paddingVertical: 6,
-                paddingHorizontal: 12,
-                borderRadius: 20,
+                paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
                 backgroundColor: selectedCategory === "" ? colors.primary : colors.surface,
-                borderWidth: 1,
-                borderColor: selectedCategory === "" ? colors.primary : colors.border,
-              }}
-            >
-              <Text
-                style={{
-                  color: selectedCategory === "" ? "#fff" : colors.foreground,
-                  fontWeight: "600",
-                  fontSize: 12,
-                }}
-              >
-                Tümü
-              </Text>
+                borderWidth: 1, borderColor: selectedCategory === "" ? colors.primary : colors.border,
+              }}>
+              <Text style={{ color: selectedCategory === "" ? "#fff" : colors.foreground, fontWeight: "600", fontSize: 13 }}>Tümü</Text>
             </TouchableOpacity>
-            {categories.map((category) => (
-              <TouchableOpacity
-                key={category}
-                onPress={() => setSelectedCategory(category)}
+            {categories.map(cat => (
+              <TouchableOpacity key={cat} onPress={() => setSelectedCategory(cat === selectedCategory ? "" : cat)}
                 style={{
-                  paddingVertical: 6,
-                  paddingHorizontal: 12,
-                  borderRadius: 20,
-                  backgroundColor: selectedCategory === category ? colors.primary : colors.surface,
-                  borderWidth: 1,
-                  borderColor: selectedCategory === category ? colors.primary : colors.border,
-                }}
-              >
-                <Text
-                  style={{
-                    color: selectedCategory === category ? "#fff" : colors.foreground,
-                    fontWeight: "600",
-                    fontSize: 12,
-                  }}
-                >
-                  {category}
-                </Text>
+                  paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                  backgroundColor: selectedCategory === cat ? colors.primary : colors.surface,
+                  borderWidth: 1, borderColor: selectedCategory === cat ? colors.primary : colors.border,
+                }}>
+                <Text style={{ color: selectedCategory === cat ? "#fff" : colors.foreground, fontWeight: "600", fontSize: 13 }}>{cat}</Text>
               </TouchableOpacity>
             ))}
-          </ScrollView>
-
-          {/* Results Count */}
-          <Text style={{ fontSize: 12, color: colors.muted }}>
-            {filteredFeatures.length} özellik bulundu
-          </Text>
-
-          {/* Features List */}
-          <View className="gap-3">
-            {filteredFeatures.length > 0 ? (
-              filteredFeatures.map((feature) => (
-                <TouchableOpacity
-                  key={feature.id}
-                  onPress={() => router.push("/features/authentication")}
-                  style={{
-                    backgroundColor: colors.surface,
-                    borderRadius: 12,
-                    padding: 12,
-                    borderWidth: 1,
-                    borderColor: colors.border,
-                  }}
-                >
-                  <View className="gap-1">
-                    <View className="flex-row items-center gap-2">
-                      <Text style={{ fontSize: 20 }}>{feature.icon}</Text>
-                      <Text style={{ fontSize: 14, fontWeight: "600", color: colors.foreground, flex: 1 }}>
-                        {feature.title}
-                      </Text>
-                    </View>
-                    <Text style={{ fontSize: 12, color: colors.muted, marginLeft: 26 }}>
-                      {feature.description}
-                    </Text>
-                    <View
-                      style={{
-                        backgroundColor: colors.primary,
-                        paddingVertical: 4,
-                        paddingHorizontal: 8,
-                        borderRadius: 4,
-                        alignSelf: "flex-start",
-                        marginTop: 6,
-                      }}
-                    >
-                      <Text style={{ fontSize: 10, color: "#fff", fontWeight: "600" }}>
-                        {feature.category}
-                      </Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))
-            ) : (
-              <View style={{ alignItems: "center", paddingVertical: 40 }}>
-                <Text style={{ fontSize: 16, color: colors.muted, textAlign: "center" }}>
-                  Aradığınız özellik bulunamadı
-                </Text>
-              </View>
-            )}
           </View>
-        </View>
+        </ScrollView>
+
+        <Text style={{ color: colors.muted, fontSize: 13 }}>{filteredFeatures.length} özellik bulundu</Text>
+
+        {filteredFeatures.map(feature => (
+          <TouchableOpacity key={feature.id}
+            onPress={() => router.push(feature.route as any)}
+            style={{
+              backgroundColor: colors.surface, borderRadius: 12, padding: 14,
+              borderWidth: 1, borderColor: colors.border,
+              flexDirection: "row", alignItems: "center", gap: 12,
+            }}>
+            <Text style={{ fontSize: 28 }}>{feature.icon}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontWeight: "700", color: colors.foreground }}>{feature.title}</Text>
+              <Text style={{ fontSize: 12, color: colors.muted }}>{feature.description}</Text>
+              <Text style={{ fontSize: 11, color: colors.primary, marginTop: 2 }}>{feature.category}</Text>
+            </View>
+            <Text style={{ color: colors.primary }}>→</Text>
+          </TouchableOpacity>
+        ))}
       </ScrollView>
     </ScreenContainer>
   );

@@ -4,118 +4,88 @@ export interface Feature {
   description: string;
   category: string;
   icon: string;
+  route: string;
 }
 
 export const ALL_FEATURES: Feature[] = [
-  // Kimlik Doğrulama
-  { id: "auth-1", title: "Biyometrik Giriş", description: "Face ID ve Fingerprint", category: "Kimlik Doğrulama", icon: "🔐" },
-  { id: "auth-2", title: "2FA", description: "İki Faktörlü Doğrulama", category: "Kimlik Doğrulama", icon: "🔐" },
-  { id: "auth-3", title: "TOTP", description: "Google Authenticator", category: "Kimlik Doğrulama", icon: "🔐" },
-  
   // Beslenme Takibi
-  { id: "nut-1", title: "Öğün Ekleme", description: "Sabah, öğle, akşam", category: "Beslenme Takibi", icon: "🍽️" },
-  { id: "nut-2", title: "Ara Öğün", description: "Dinamik ara öğün ekleme", category: "Beslenme Takibi", icon: "🍽️" },
-  { id: "nut-3", title: "Beslenme Hedefleri", description: "Kalori ve makro hedefleri", category: "Beslenme Takibi", icon: "🍽️" },
-  
+  { id: "nut-1", title: "Öğün Ekle", description: "Yemek ve kalori kaydı", category: "Beslenme Takibi", icon: "🍽️", route: "/(tabs)/meals" },
+  { id: "nut-2", title: "Beslenme Hedefleri", description: "Kalori ve makro hedefleri", category: "Beslenme Takibi", icon: "🎯", route: "/(tabs)/meals" },
+  { id: "nut-3", title: "Öğün Fotoğrafı", description: "Fotoğraf ile öğün kaydı", category: "Beslenme Takibi", icon: "📷", route: "/meal-photo-upload" },
+  { id: "nut-4", title: "Haftalık Rapor", description: "Haftalık beslenme özeti", category: "Beslenme Takibi", icon: "📊", route: "/weekly-reports" },
+
   // Sağlık Verileri
-  { id: "health-1", title: "Adımlar", description: "Günlük adım takibi", category: "Sağlık Verileri", icon: "❤️" },
-  { id: "health-2", title: "Kalp Atış Hızı", description: "Kalp ritmi takibi", category: "Sağlık Verileri", icon: "❤️" },
-  { id: "health-3", title: "Uyku Takibi", description: "Uyku kalitesi ve süresi", category: "Sağlık Verileri", icon: "❤️" },
-  
+  { id: "health-1", title: "Su Takibi", description: "Günlük su tüketimi", category: "Sağlık Verileri", icon: "💧", route: "/features/health" },
+  { id: "health-2", title: "Kalori Yakımı", description: "Aktivite ve egzersiz", category: "Sağlık Verileri", icon: "🔥", route: "/features/health" },
+  { id: "health-3", title: "BMI Hesaplama", description: "Vücut kitle indeksi", category: "Sağlık Verileri", icon: "📏", route: "/features/health" },
+  { id: "health-4", title: "Kan Şekeri", description: "Kan şekeri takibi", category: "Sağlık Verileri", icon: "🩸", route: "/features/health" },
+  { id: "health-5", title: "Tansiyon", description: "Tansiyon ölçüm kaydı", category: "Sağlık Verileri", icon: "💓", route: "/features/health" },
+  { id: "health-6", title: "Akıllı Saat", description: "Wearable cihaz bağlantısı", category: "Sağlık Verileri", icon: "⌚", route: "/wearable-sync" },
+
   // Analitik
-  { id: "ana-1", title: "Haftalık Trendler", description: "Hafta bazında analiz", category: "Analitik", icon: "📊" },
-  { id: "ana-2", title: "Aylık Karşılaştırma", description: "Ay bazında karşılaştırma", category: "Analitik", icon: "📊" },
-  { id: "ana-3", title: "Hedef İlerleme", description: "Hedef başarı oranı", category: "Analitik", icon: "📊" },
-  
+  { id: "ana-1", title: "Sağlık Analizi", description: "Adım, kalp, uyku grafikleri", category: "Analitik", icon: "📊", route: "/(tabs)/health-analytics" },
+  { id: "ana-2", title: "Hedef İlerleme", description: "Hedef takip ve tamamlama", category: "Analitik", icon: "🎯", route: "/advanced-analytics" },
+  { id: "ana-3", title: "Trend Grafikleri", description: "Sağlık trend analizi", category: "Analitik", icon: "📈", route: "/health-trend-charts" },
+
+  // Mutfak ve Gıda
+  { id: "food-1", title: "Türk Mutfağı", description: "137+ Türk yemeği", category: "Gıda", icon: "🇹🇷", route: "/food-management-categorized" },
+  { id: "food-2", title: "İtalyan Mutfağı", description: "65 İtalyan yemeği", category: "Gıda", icon: "🇮🇹", route: "/food-management-categorized" },
+  { id: "food-3", title: "Diyetisyen Öneri/Yasak", description: "Önerilen ve yasaklı gıdalar", category: "Gıda", icon: "✅", route: "/food-management-categorized" },
+  { id: "food-4", title: "Gıda Grupları", description: "Diyetisyen gıda grupları", category: "Gıda", icon: "📦", route: "/food-management-categorized" },
+
   // Mesajlaşma
-  { id: "msg-1", title: "Real-time Mesajlaşma", description: "Canlı sohbet", category: "Mesajlaşma", icon: "💬" },
-  { id: "msg-2", title: "Mesaj Geçmişi", description: "Tüm konuşmaları görüntüle", category: "Mesajlaşma", icon: "💬" },
-  
-  // Bildirimler
-  { id: "notif-1", title: "2FA Alerts", description: "Güvenlik bildirimleri", category: "Bildirimler", icon: "🔔" },
-  { id: "notif-2", title: "Meal Reminders", description: "Öğün hatırlatmaları", category: "Bildirimler", icon: "🔔" },
-  
-  // Dashboard
-  { id: "dash-1", title: "Müşteri Listesi", description: "Tüm danışanları görüntüle", category: "Dashboard", icon: "👨‍⚕️" },
-  { id: "dash-2", title: "Sağlık Kartları", description: "Müşteri sağlık durumu", category: "Dashboard", icon: "👨‍⚕️" },
-  
-  // Profil
-  { id: "prof-1", title: "Profil Düzenleme", description: "Bilgilerinizi güncelleyin", category: "Profil", icon: "👤" },
-  { id: "prof-2", title: "Tema Ayarları", description: "Açık/koyu mod", category: "Profil", icon: "👤" },
-  
-  // Ödeme
-  { id: "pay-1", title: "Stripe Ödeme", description: "Güvenli ödeme", category: "Ödeme", icon: "💳" },
-  { id: "pay-2", title: "Abonelik", description: "Abonelik yönetimi", category: "Ödeme", icon: "💳" },
-  
-  // Beslenme Analizi
-  { id: "meal-1", title: "Fotoğraf Yükleme", description: "Öğün fotoğrafı", category: "Beslenme Analizi", icon: "📸" },
-  { id: "meal-2", title: "AI Analiz", description: "Yapay zeka analizi", category: "Beslenme Analizi", icon: "📸" },
-  
+  { id: "msg-1", title: "Mesajlaşma", description: "Diyetisyen ile iletişim", category: "Mesajlaşma", icon: "💬", route: "/messaging" },
+  { id: "msg-2", title: "Diyetisyen Önerileri", description: "Diyetisyenden gelen öneriler", category: "Mesajlaşma", icon: "💡", route: "/dietitian-recommendations" },
+  { id: "msg-3", title: "Video Danışma", description: "Görüntülü görüşme", category: "Mesajlaşma", icon: "📹", route: "/video-consultation" },
+
   // Randevu
-  { id: "appt-1", title: "Randevu Oluşturma", description: "Yeni randevu", category: "Randevu", icon: "📅" },
-  { id: "appt-2", title: "Takvim Görünümü", description: "Randevu takvimi", category: "Randevu", icon: "📅" },
-  
+  { id: "appt-1", title: "Randevu Oluştur", description: "Yeni randevu al", category: "Randevu", icon: "📅", route: "/calendar-appointments" },
+  { id: "appt-2", title: "Takvim Görünümü", description: "Tüm randevular", category: "Randevu", icon: "🗓️", route: "/calendar-appointments" },
+
   // Hedefler
-  { id: "goal-1", title: "Hedef Oluşturma", description: "Yeni hedef belirle", category: "Hedefler", icon: "🎯" },
-  { id: "goal-2", title: "Hedef İlerleme", description: "Hedef başarı takibi", category: "Hedefler", icon: "🎯" },
+  { id: "goal-1", title: "Sağlık Hedefleri", description: "Kalori, protein, su, adım, uyku, kilo", category: "Hedefler", icon: "🎯", route: "/health-goals" },
+  { id: "goal-2", title: "Hedef Analitik", description: "Hedef ilerleme ve tamamlama", category: "Hedefler", icon: "📈", route: "/advanced-analytics" },
 
-  // Geri Bildirim
-  { id: "feed-1", title: "Danışan Geri Bildirimi", description: "Diyetisyene geri bildirim gönder", category: "Geri Bildirim", icon: "💭" },
-  { id: "feed-2", title: "Diyetisyen Yanıtları", description: "Geri bildirim yanıtlarını görüntüle", category: "Geri Bildirim", icon: "💭" },
+  // Mikro Besin
+  { id: "micro-1", title: "Mikro Besin Takibi", description: "Vitamin ve mineral", category: "Beslenme Takibi", icon: "🔬", route: "/micronutrient-tracking" },
 
-  // Bildirimler Ek
-  { id: "notif-3", title: "Bildirim Ayarları", description: "Bildirim tercihlerini yönet", category: "Bildirimler", icon: "🔔" },
-  { id: "notif-4", title: "Sağlık Uyarıları", description: "Sağlık hedefi uyarıları", category: "Bildirimler", icon: "🔔" },
+  // Bildirimler
+  { id: "notif-1", title: "Hatırlatıcılar", description: "Öğün, randevu, hedef", category: "Bildirimler", icon: "⏰", route: "/(tabs)/notifications" },
+  { id: "notif-2", title: "Rozetler", description: "Başarı rozetleri", category: "Bildirimler", icon: "🏆", route: "/(tabs)/notifications" },
+  { id: "notif-3", title: "2FA Güvenlik", description: "İki aşamalı doğrulama", category: "Bildirimler", icon: "🔐", route: "/(tabs)/notifications" },
 
-  // Trend Analizi
-  { id: "trend-1", title: "Sağlık Trendleri", description: "Zaman içindeki değişimler", category: "Analitik", icon: "📊" },
-  { id: "trend-2", title: "Trend Tahmini", description: "Gelecek 7 gün tahmini", category: "Analitik", icon: "📊" },
+  // Profil
+  { id: "prof-1", title: "Profil Düzenle", description: "Ad, email, rol güncelle", category: "Profil", icon: "👤", route: "/(tabs)/profile" },
+  { id: "prof-2", title: "Tema Ayarı", description: "Açık/Koyu mod", category: "Profil", icon: "🎨", route: "/(tabs)/profile" },
+  { id: "prof-3", title: "Dil Seçimi", description: "Türkçe / İngilizce", category: "Profil", icon: "🌍", route: "/(tabs)/profile" },
+  { id: "prof-4", title: "Diyetisyen Bul", description: "Kayıtsız mesaj gönder", category: "Profil", icon: "🔍", route: "/(tabs)/profile" },
+
+  // Diyetisyen
+  { id: "diet-1", title: "Danışan Ekle", description: "Yeni danışan takibi", category: "Diyetisyen", icon: "👥", route: "/(tabs)/dietitian-dashboard" },
+  { id: "diet-2", title: "Danışan Sağlık Kartı", description: "Hastalık derecelendirme", category: "Diyetisyen", icon: "🩺", route: "/client-health-data" },
+  { id: "diet-3", title: "Danışma Notları", description: "Not al ve danışana gönder", category: "Diyetisyen", icon: "📝", route: "/dietitian-notes" },
+  { id: "diet-4", title: "Öğün Plan Şablonları", description: "Hazır öğün planları", category: "Diyetisyen", icon: "📋", route: "/meal-plan-templates" },
+
+  // Ödeme
+  { id: "pay-1", title: "Ödeme & Abonelik", description: "Paket ve ücret yönetimi", category: "Ödeme", icon: "💳", route: "/payment-subscription" },
 ];
 
-/**
- * Özellikleri arama terimi ile filtrele
- */
 export function searchFeatures(query: string): Feature[] {
-  const lowerQuery = query.toLowerCase().trim();
-  if (!lowerQuery) return ALL_FEATURES;
-
-  return ALL_FEATURES.filter(
-    (feature) =>
-      feature.title.toLowerCase().includes(lowerQuery) ||
-      feature.description.toLowerCase().includes(lowerQuery) ||
-      feature.category.toLowerCase().includes(lowerQuery)
+  const q = query.toLowerCase().trim();
+  if (!q) return ALL_FEATURES;
+  return ALL_FEATURES.filter(f =>
+    f.title.toLowerCase().includes(q) ||
+    f.description.toLowerCase().includes(q) ||
+    f.category.toLowerCase().includes(q)
   );
 }
 
-/**
- * Özellikleri kategoriye göre filtrele
- */
-export function filterByCategory(category: string): Feature[] {
-  if (!category) return ALL_FEATURES;
-  return ALL_FEATURES.filter((feature) => feature.category === category);
-}
-
-/**
- * Tüm kategorileri al
- */
-export function getCategories(): string[] {
-  const categories = new Set(ALL_FEATURES.map((f) => f.category));
-  return Array.from(categories).sort();
-}
-
-/**
- * Arama ve kategori filtresi ile birleştirilmiş sonuç
- */
 export function searchAndFilter(query: string, category: string): Feature[] {
-  let results = ALL_FEATURES;
-
-  if (query.trim()) {
-    results = searchFeatures(query);
-  }
-
-  if (category) {
-    results = results.filter((f) => f.category === category);
-  }
-
+  let results = searchFeatures(query);
+  if (category) results = results.filter(f => f.category === category);
   return results;
+}
+
+export function getCategories(): string[] {
+  return Array.from(new Set(ALL_FEATURES.map(f => f.category)));
 }

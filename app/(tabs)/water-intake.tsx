@@ -1,134 +1,107 @@
-import { ActivityIndicator, ScrollView, Text, View, Pressable } from "react-native";
+import { ScrollView, Text, View, TouchableOpacity, Alert } from "react-native";
 import { useState, useEffect } from "react";
 import { ScreenContainer } from "@/components/screen-container";
-import { FieldLabel, SectionCard, SectionTitle, PrimaryButton } from "@/components/app-ui";
 import { useColors } from "@/hooks/use-colors";
-import { useAuth } from "@/hooks/use-auth";
-import { trpc } from "@/lib/trpc";
-import { startOAuthLogin } from "@/constants/oauth";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const WATER_KEY = "water_intake_today";
+const WATER_GOAL_KEY = "water_goal_ml";
+
+const AMOUNTS = [150, 200, 250, 300, 500];
 
 export default function WaterIntakeScreen() {
   const colors = useColors();
-  const { isAuthenticated, loading } = useAuth();
-  const profileQuery = trpc.profile.me.useQuery(undefined, { enabled: isAuthenticated });
+  const [totalMl, setTotalMl] = useState(0);
+  const [goalMl, setGoalMl] = useState(2000);
+  const [logs, setLogs] = useState<{ amount: number; time: string }[]>([]);
 
-  const role = profileQuery.data?.profile?.role;
-  const waterQuery = trpc.waterIntake.getTodayTotal.useQuery(undefined, { enabled: isAuthenticated });
-  const goalsQuery = trpc.nutritionGoals.get.useQuery(
-    { clientUserId: profileQuery.data?.profile?.userId ?? 0 },
-    { enabled: isAuthenticated && role === "client" },
-  );
+  useEffect(() => { loadData(); }, []);
 
-  const addWaterMutation = trpc.waterIntake.add.useMutation({
-    onSuccess: () => {
-      waterQuery.refetch();
-    },
-  });
-
-  const todayTotal = waterQuery.data ?? 0;
-  const waterGoal = goalsQuery.data?.waterIntakeGoal ?? 2000;
-  const percentage = Math.min((todayTotal / waterGoal) * 100, 100);
-
-  const handleAddWater = (amount: number) => {
-    addWaterMutation.mutate({
-      clientUserId: profileQuery.data?.profile?.userId ?? 0,
-      amountMl: amount,
-    });
+  const loadData = async () => {
+    const today = new Date().toISOString().split("T")[0];
+    const saved = await AsyncStorage.getItem(`${WATER_KEY}_${today}`);
+    if (saved) {
+      const data = JSON.parse(saved);
+      setLogs(data);
+      setTotalMl(data.reduce((s: number, l: any) => s + l.amount, 0));
+    }
+    const goal = await AsyncStorage.getItem(WATER_GOAL_KEY);
+    if (goal) setGoalMl(Number(goal));
   };
 
-  if (loading || (isAuthenticated && profileQuery.isLoading)) {
-    return (
-      <ScreenContainer className="items-center justify-center px-6">
-        <ActivityIndicator color={colors.primary} />
-      </ScreenContainer>
-    );
-  }
+  const addWater = async (amount: number) => {
+    const today = new Date().toISOString().split("T")[0];
+    const entry = { amount, time: new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) };
+    const updated = [...logs, entry];
+    setLogs(updated);
+    const newTotal = totalMl + amount;
+    setTotalMl(newTotal);
+    await AsyncStorage.setItem(`${WATER_KEY}_${today}`, JSON.stringify(updated));
+    if (newTotal >= goalMl) Alert.alert("🎉 Tebrikler!", "Günlük su hedefinize ulaştınız!");
+  };
 
-  if (!isAuthenticated) {
-    return (
-      <ScreenContainer className="p-6 justify-center">
-        <View className="gap-4">
-          <Text className="text-3xl font-bold text-foreground">Su takibi için giriş yapın.</Text>
-          <PrimaryButton label="Giriş Yap" onPress={() => startOAuthLogin()} />
-        </View>
-      </ScreenContainer>
-    );
-  }
+  const pct = Math.min((totalMl / goalMl) * 100, 100);
+  const remaining = Math.max(goalMl - totalMl, 0);
 
   return (
-    <ScreenContainer className="p-6">
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
-        <View className="gap-6">
-          <SectionTitle title="Su Takibi" subtitle="Günlük su tüketimini kaydedin" />
+    <ScreenContainer>
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 32 }}>
+        <Text style={{ fontSize: 24, fontWeight: "bold", color: colors.foreground }}>💧 Su Takibi</Text>
 
-          {/* Progress Card */}
-          <SectionCard>
-            <View className="gap-4">
-              <View className="gap-2">
-                <View className="flex-row justify-between items-center">
-                  <Text className="text-sm font-semibold text-foreground">Bugün</Text>
-                  <Text className="text-sm text-muted">{todayTotal} / {waterGoal} ml</Text>
-                </View>
-                <View
-                  style={{
-                    height: 12,
-                    backgroundColor: colors.border,
-                    borderRadius: 6,
-                    overflow: "hidden",
-                  }}
-                >
-                  <View
-                    style={{
-                      height: "100%",
-                      width: `${percentage}%`,
-                      backgroundColor: colors.primary,
-                    }}
-                  />
-                </View>
-              </View>
-              <Text className="text-center text-2xl font-bold text-foreground">
-                {Math.round(percentage)}%
-              </Text>
-            </View>
-          </SectionCard>
-
-          {/* Quick Add Buttons */}
-          <View className="gap-3">
-            <FieldLabel label="Su Ekle" />
-            <View className="flex-row gap-2 flex-wrap">
-              {[250, 500, 750, 1000].map((amount) => (
-                <Pressable
-                  key={amount}
-                  onPress={() => handleAddWater(amount)}
-                  style={{
-                    flex: 1,
-                    minWidth: "45%",
-                    paddingHorizontal: 12,
-                    paddingVertical: 12,
-                    borderRadius: 12,
-                    backgroundColor: colors.surface,
-                    borderWidth: 1,
-                    borderColor: colors.border,
-                    alignItems: "center",
-                  }}
-                >
-                  <Text className="font-semibold text-foreground">{amount} ml</Text>
-                </Pressable>
-              ))}
-            </View>
+        {/* Dairesel ilerleme */}
+        <View style={{ alignItems: "center", gap: 8 }}>
+          <View style={{
+            width: 160, height: 160, borderRadius: 80,
+            borderWidth: 12, borderColor: colors.border,
+            alignItems: "center", justifyContent: "center",
+            backgroundColor: colors.surface,
+          }}>
+            <View style={{
+              position: "absolute", width: 160, height: 160, borderRadius: 80,
+              borderWidth: 12, borderColor: "#3b82f6",
+              opacity: pct / 100,
+            }} />
+            <Text style={{ fontSize: 28, fontWeight: "bold", color: "#3b82f6" }}>{totalMl} ml</Text>
+            <Text style={{ fontSize: 12, color: colors.muted }}>/ {goalMl} ml</Text>
           </View>
-
-          {/* Status Message */}
-          <SectionCard>
-            {todayTotal >= waterGoal ? (
-              <Text className="text-center text-success font-semibold">✓ Günlük su hedefini tamamladınız!</Text>
-            ) : (
-              <Text className="text-center text-muted">
-                Kalan: {waterGoal - todayTotal} ml
-              </Text>
-            )}
-          </SectionCard>
+          <Text style={{ color: colors.muted }}>
+            {remaining > 0 ? `${remaining} ml daha için` : "✅ Hedef tamamlandı!"}
+          </Text>
         </View>
+
+        {/* İlerleme çubuğu */}
+        <View style={{ height: 16, backgroundColor: colors.border, borderRadius: 8 }}>
+          <View style={{ height: 16, backgroundColor: "#3b82f6", borderRadius: 8, width: `${pct}%` }} />
+        </View>
+
+        {/* Hızlı ekle */}
+        <View style={{ gap: 8 }}>
+          <Text style={{ fontWeight: "700", color: colors.foreground }}>💧 Su Ekle</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+            {AMOUNTS.map(a => (
+              <TouchableOpacity key={a} onPress={() => addWater(a)}
+                style={{
+                  paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12,
+                  backgroundColor: "#3b82f620", borderWidth: 2, borderColor: "#3b82f6",
+                }}>
+                <Text style={{ color: "#3b82f6", fontWeight: "700", fontSize: 15 }}>{a} ml</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Günlük log */}
+        {logs.length > 0 && (
+          <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 14, gap: 6, borderWidth: 1, borderColor: colors.border }}>
+            <Text style={{ fontWeight: "700", color: colors.foreground }}>📋 Bugünkü İçimler</Text>
+            {[...logs].reverse().map((log, i) => (
+              <View key={i} style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: colors.foreground }}>💧 {log.amount} ml</Text>
+                <Text style={{ color: colors.muted }}>{log.time}</Text>
+              </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
     </ScreenContainer>
   );
