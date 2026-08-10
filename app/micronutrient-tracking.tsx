@@ -1,373 +1,267 @@
-import { BackButton } from "@/components/back-button";
-import { ScrollView, Text, View, TouchableOpacity, TextInput, Alert, Modal, FlatList } from "react-native";
-import { ScreenContainer } from "@/components/screen-container";
-import { useColors } from "@/hooks/use-colors";
-import { useState, useEffect } from "react";
+import {BackButton} from "@/components/back-button";
+import {ScrollView,Text,View,TouchableOpacity,TextInput,Alert,Modal,KeyboardAvoidingView,Platform} from "react-native";
+import {ScreenContainer} from "@/components/screen-container";
+import {useColors} from "@/hooks/use-colors";
+import {useState,useEffect} from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getUserRegistration } from "@/lib/_core/user-registration";
+import {getMyClients,ClientRecord} from "@/lib/_core/clients-store";
+import {useSafeAreaInsets} from "react-native-safe-area-context";
 
-const MICRO_GOALS_KEY = "micronutrient_goals_v2";
-const MICRO_LOG_KEY = "micronutrient_log_v2";
+const GOALS_KEY="micro_goals_v3";const LOG_KEY="micro_log_v3";const MSGS_KEY="chat_v3";
 
-interface MicroGoal {
-  id: string;
-  clientId: string;
-  clientName: string;
-  nutrient: string;
-  unit: string;
-  dailyTarget: number;
-  icon: string;
-}
+interface MicroGoal{nutrientId:string;clientId:string;clientName:string;nutrient:string;unit:string;dailyTarget:number;weeklyTarget:number;icon:string;}
+interface MicroLog{id:string;clientId:string;nutrientId:string;nutrient:string;amount:number;unit:string;foodSource:string;date:string;}
 
-interface MicroLog {
-  id: string;
-  clientId: string;
-  nutrientId: string;
-  nutrient: string;
-  amount: number;
-  unit: string;
-  foodSource: string;
-  date: string;
-}
-
-const NUTRIENTS = [
-  { id: "vit-c", name: "C Vitamini", unit: "mg", icon: "🍊", defaultTarget: 90, foods: ["Portakal", "Limon", "Kivi", "Çilek", "Biber", "Brokoli", "Domates"] },
-  { id: "vit-d", name: "D Vitamini", unit: "mcg", icon: "☀️", defaultTarget: 20, foods: ["Somon", "Ton balığı", "Yumurta", "Mantar", "Süt"] },
-  { id: "vit-b12", name: "B12 Vitamini", unit: "mcg", icon: "💊", defaultTarget: 2.4, foods: ["Et", "Tavuk", "Balık", "Yumurta", "Süt", "Peynir"] },
-  { id: "iron", name: "Demir", unit: "mg", icon: "🔴", defaultTarget: 18, foods: ["Kırmızı et", "Mercimek", "Ispanak", "Fasulye", "Tofu", "Susam"] },
-  { id: "calcium", name: "Kalsiyum", unit: "mg", icon: "🦴", defaultTarget: 1000, foods: ["Süt", "Peynir", "Yoğurt", "Brokoli", "Badem", "Susam"] },
-  { id: "magnesium", name: "Magnezyum", unit: "mg", icon: "⚡", defaultTarget: 400, foods: ["Kabak çekirdeği", "Badem", "Ispanak", "Avokado", "Bitter çikolata"] },
-  { id: "zinc", name: "Çinko", unit: "mg", icon: "🔵", defaultTarget: 11, foods: ["Kabak çekirdeği", "Kırmızı et", "Ceviz", "Nohut", "Yulaf"] },
-  { id: "potassium", name: "Potasyum", unit: "mg", icon: "🍌", defaultTarget: 4700, foods: ["Muz", "Patates", "Fasulye", "Avokado", "Ispanak"] },
-  { id: "omega3", name: "Omega-3", unit: "g", icon: "🐟", defaultTarget: 1.6, foods: ["Somon", "Uskumru", "Keten tohumu", "Ceviz", "Chia tohumu"] },
-  { id: "fiber", name: "Lif", unit: "g", icon: "🌾", defaultTarget: 25, foods: ["Sebze", "Meyve", "Tam tahıl", "Baklagiller", "Kuruyemiş"] },
-  { id: "folic", name: "Folik Asit", unit: "mcg", icon: "🌿", defaultTarget: 400, foods: ["Ispanak", "Mercimek", "Fasulye", "Avokado", "Brokoli"] },
-  { id: "vit-a", name: "A Vitamini", unit: "mcg", icon: "🥕", defaultTarget: 900, foods: ["Havuç", "Tatlı patates", "Ispanak", "Kayısı", "Mango"] },
+const NUTRIENTS=[
+  {id:"vit-c",name:"C Vitamini",unit:"mg",icon:"🍊",defaultDaily:90,foods:["Portakal","Limon","Kivi","Çilek","Biber","Brokoli"]},
+  {id:"vit-d",name:"D Vitamini",unit:"mcg",icon:"☀️",defaultDaily:20,foods:["Somon","Ton balığı","Yumurta","Süt","Mantar"]},
+  {id:"vit-b12",name:"B12 Vitamini",unit:"mcg",icon:"💊",defaultDaily:2.4,foods:["Et","Tavuk","Balık","Yumurta","Peynir"]},
+  {id:"iron",name:"Demir",unit:"mg",icon:"🔴",defaultDaily:18,foods:["Kırmızı et","Mercimek","Ispanak","Fasulye","Susam"]},
+  {id:"calcium",name:"Kalsiyum",unit:"mg",icon:"🦴",defaultDaily:1000,foods:["Süt","Peynir","Yoğurt","Brokoli","Badem"]},
+  {id:"magnesium",name:"Magnezyum",unit:"mg",icon:"⚡",defaultDaily:400,foods:["Kabak çekirdeği","Badem","Ispanak","Avokado"]},
+  {id:"zinc",name:"Çinko",unit:"mg",icon:"🔵",defaultDaily:11,foods:["Kabak çekirdeği","Kırmızı et","Ceviz","Nohut"]},
+  {id:"omega3",name:"Omega-3",unit:"g",icon:"🐟",defaultDaily:1.6,foods:["Somon","Uskumru","Keten tohumu","Ceviz"]},
+  {id:"fiber",name:"Lif",unit:"g",icon:"🌾",defaultDaily:25,foods:["Sebze","Meyve","Tam tahıl","Baklagiller"]},
+  {id:"folic",name:"Folik Asit",unit:"mcg",icon:"🌿",defaultDaily:400,foods:["Ispanak","Mercimek","Fasulye","Avokado"]},
+  {id:"potassium",name:"Potasyum",unit:"mg",icon:"🍌",defaultDaily:4700,foods:["Muz","Patates","Fasulye","Avokado"]},
+  {id:"vit-a",name:"A Vitamini",unit:"mcg",icon:"🥕",defaultDaily:900,foods:["Havuç","Tatlı patates","Ispanak","Kayısı"]},
 ];
 
-const SAMPLE_CLIENTS = [
-  { id: "c1", name: "Ayşe Yılmaz" },
-  { id: "c2", name: "Mehmet Demir" },
-  { id: "c3", name: "Fatma Kaya" },
-];
+const FOOD_MAP:Record<string,Partial<Record<string,number>>>={
+  "Portakal":{"vit-c":70},"Somon":{"vit-d":15,"omega3":2.2},"Ispanak":{"iron":3.6,"calcium":240,"folic":194,"vit-a":469},
+  "Mercimek":{"iron":6.6,"folic":358,"fiber":15.6},"Süt":{"calcium":300,"vit-d":3},"Badem":{"calcium":264,"magnesium":270},
+  "Muz":{"potassium":422},"Keten tohumu":{"omega3":6.4,"fiber":7.7},"Havuç":{"vit-a":835},"Yumurta":{"vit-b12":0.6,"vit-d":2},
+};
 
-export default function MicronutrientTrackingScreen() {
-  const colors = useColors();
-  const [role, setRole] = useState<"dietitian" | "client">("client");
-  const [goals, setGoals] = useState<MicroGoal[]>([]);
-  const [logs, setLogs] = useState<MicroLog[]>([]);
-  const [selectedClient, setSelectedClient] = useState(SAMPLE_CLIENTS[0]);
-  const [activeTab, setActiveTab] = useState<"overview" | "log" | "goals">("overview");
-  const [showLogModal, setShowLogModal] = useState(false);
-  const [selectedNutrient, setSelectedNutrient] = useState(NUTRIENTS[0]);
-  const [logAmount, setLogAmount] = useState("");
-  const [searchFood, setSearchFood] = useState("");
-  const [selectedFood, setSelectedFood] = useState("");
+export default function MicronutrientTrackingScreen(){
+  const colors=useColors();const insets=useSafeAreaInsets();
+  const [role,setRole]=useState<"dietitian"|"client">("client");
+  const [goals,setGoals]=useState<MicroGoal[]>([]);const [logs,setLogs]=useState<MicroLog[]>([]);
+  const [clients,setClients]=useState<ClientRecord[]>([]);const [selClient,setSelClient]=useState<ClientRecord|null>(null);
+  const [tab,setTab]=useState<"overview"|"log"|"goals">("overview");
+  const [showGoalModal,setShowGoalModal]=useState(false);const [showLogModal,setShowLogModal]=useState(false);
+  const [selNutrient,setSelNutrient]=useState(NUTRIENTS[0]);
+  const [goalDaily,setGoalDaily]=useState("");const [goalWeekly,setGoalWeekly]=useState("");
+  const [logAmount,setLogAmount]=useState("");const [logFood,setLogFood]=useState("");
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(()=>{load();},[]);
+  const load=async()=>{
+    const s=await AsyncStorage.getItem("session_v3");if(s)setRole(JSON.parse(s).role??"client");
+    const c=await getMyClients();setClients(c);if(c.length>0)setSelClient(c[0]);
+    const g=await AsyncStorage.getItem(GOALS_KEY);if(g)setGoals(JSON.parse(g));
+    const l=await AsyncStorage.getItem(LOG_KEY);if(l)setLogs(JSON.parse(l));
+  };
+  const saveGoals=async(list:MicroGoal[])=>{setGoals(list);await AsyncStorage.setItem(GOALS_KEY,JSON.stringify(list));};
+  const saveLogs=async(list:MicroLog[])=>{setLogs(list);await AsyncStorage.setItem(LOG_KEY,JSON.stringify(list));};
 
-  const loadData = async () => {
-    const user = await getUserRegistration();
-    setRole(user?.role ?? "client");
-    const savedGoals = await AsyncStorage.getItem(MICRO_GOALS_KEY);
-    if (savedGoals) setGoals(JSON.parse(savedGoals));
-    else {
-      // Varsayılan hedefleri yükle
-      const defaults = NUTRIENTS.map(n => ({
-        id: n.id,
-        clientId: "c1",
-        clientName: "Ayşe Yılmaz",
-        nutrient: n.name,
-        unit: n.unit,
-        dailyTarget: n.defaultTarget,
-        icon: n.icon,
-      }));
-      setGoals(defaults);
-      await AsyncStorage.setItem(MICRO_GOALS_KEY, JSON.stringify(defaults));
+  const saveGoal=async()=>{
+    if(!goalDaily){Alert.alert("Hata","Günlük hedef girin");return;}
+    if(!selClient&&role==="dietitian"){Alert.alert("Hata","Danışan seçin");return;}
+    const cid=role==="dietitian"?selClient!.id:"me";
+    const cname=role==="dietitian"?selClient!.name:"Ben";
+    const g:MicroGoal={nutrientId:selNutrient.id,clientId:cid,clientName:cname,nutrient:selNutrient.name,unit:selNutrient.unit,dailyTarget:Number(goalDaily),weeklyTarget:Number(goalWeekly)||Number(goalDaily)*7,icon:selNutrient.icon};
+    await saveGoals([...goals.filter(x=>!(x.nutrientId===selNutrient.id&&x.clientId===cid)),g]);
+    if(role==="dietitian"&&selClient){
+      const msg={id:Date.now().toString(),senderId:"dietitian",senderName:"Diyetisyeniniz",content:`📊 Yeni mikro besin hedefi: ${selNutrient.icon} ${selNutrient.name} — Günlük ${goalDaily} ${selNutrient.unit}${goalWeekly?`, Haftalık ${goalWeekly} ${selNutrient.unit}`:""}`,createdAt:new Date().toISOString(),status:"delivered"};
+      const saved=await AsyncStorage.getItem(MSGS_KEY);const all=saved?JSON.parse(saved):{};
+      all[selClient.id]=[...(all[selClient.id]??[]),msg];await AsyncStorage.setItem(MSGS_KEY,JSON.stringify(all));
     }
-    const savedLogs = await AsyncStorage.getItem(MICRO_LOG_KEY);
-    if (savedLogs) setLogs(JSON.parse(savedLogs));
+    setShowGoalModal(false);setGoalDaily("");setGoalWeekly("");
+    Alert.alert("✅ Hedef Belirlendi",`${cname}'a mesaj gönderildi.`);
   };
 
-  const saveGoals = async (list: MicroGoal[]) => {
-    setGoals(list);
-    await AsyncStorage.setItem(MICRO_GOALS_KEY, JSON.stringify(list));
-  };
-
-  const addLog = async () => {
-    if (!logAmount || isNaN(Number(logAmount))) { Alert.alert("Hata", "Geçerli miktar girin"); return; }
-    const today = new Date().toISOString().split("T")[0];
-    const log: MicroLog = {
-      id: Date.now().toString(),
-      clientId: role === "dietitian" ? selectedClient.id : "c1",
-      nutrientId: selectedNutrient.id,
-      nutrient: selectedNutrient.name,
-      amount: Number(logAmount),
-      unit: selectedNutrient.unit,
-      foodSource: selectedFood || "Manuel giriş",
-      date: today,
-    };
-    const updated = [...logs, log];
-    setLogs(updated);
-    await AsyncStorage.setItem(MICRO_LOG_KEY, JSON.stringify(updated));
-    setLogAmount(""); setSelectedFood(""); setShowLogModal(false);
-    Alert.alert("Kaydedildi ✅", `${selectedNutrient.name}: ${log.amount}${log.unit} eklendi.`);
-  };
-
-  const setGoalTarget = async (nutrientId: string, target: number) => {
-    const clientId = selectedClient.id;
-    const exists = goals.find(g => g.id === nutrientId && g.clientId === clientId);
-    const nutrient = NUTRIENTS.find(n => n.id === nutrientId)!;
-    let updated: MicroGoal[];
-    if (exists) {
-      updated = goals.map(g => g.id === nutrientId && g.clientId === clientId ? { ...g, dailyTarget: target } : g);
-    } else {
-      updated = [...goals, {
-        id: nutrientId, clientId, clientName: selectedClient.name,
-        nutrient: nutrient.name, unit: nutrient.unit, dailyTarget: target, icon: nutrient.icon,
-      }];
+  const addLog=async()=>{
+    if(!logAmount){Alert.alert("Hata","Miktar girin");return;}
+    const today=new Date().toISOString().split("T")[0];
+    const cid=role==="client"?"me":selClient?.id??"me";
+    const entry:MicroLog={id:Date.now().toString(),clientId:cid,nutrientId:selNutrient.id,nutrient:selNutrient.name,amount:Number(logAmount),unit:selNutrient.unit,foodSource:logFood||"Manuel giriş",date:today};
+    const autoLogs:MicroLog[]=[];
+    if(logFood&&FOOD_MAP[logFood]){
+      Object.entries(FOOD_MAP[logFood]!).forEach(([nid,amt])=>{
+        if(nid!==selNutrient.id){const n=NUTRIENTS.find(x=>x.id===nid);if(n)autoLogs.push({id:`${Date.now()}_${nid}`,clientId:cid,nutrientId:nid,nutrient:n.name,amount:amt!,unit:n.unit,foodSource:logFood,date:today});}
+      });
     }
-    await saveGoals(updated);
+    await saveLogs([...logs,entry,...autoLogs]);
+    setShowLogModal(false);setLogAmount("");setLogFood("");
+    if(autoLogs.length>0)Alert.alert("✅ Kaydedildi",`${selNutrient.name} eklendi!\n${logFood} kaynaklı ${autoLogs.length} besin daha otomatik eklendi.`);
+    else Alert.alert("✅ Kaydedildi");
   };
 
-  const today = new Date().toISOString().split("T")[0];
-  const clientId = role === "dietitian" ? selectedClient.id : "c1";
-  const clientGoals = goals.filter(g => g.clientId === clientId);
-  const todayLogs = logs.filter(l => l.date === today && l.clientId === clientId);
+  const today=new Date().toISOString().split("T")[0];
+  const cid=role==="client"?"me":selClient?.id??"me";
+  const clientGoals=goals.filter(g=>g.clientId===cid);
+  const todayLogs=logs.filter(l=>l.date===today&&l.clientId===cid);
+  const getTotal=(nid:string)=>todayLogs.filter(l=>l.nutrientId===nid).reduce((s,l)=>s+l.amount,0);
 
-  const getTodayTotal = (nutrientId: string) =>
-    todayLogs.filter(l => l.nutrientId === nutrientId).reduce((s, l) => s + l.amount, 0);
+  const CS=()=>role==="dietitian"?(<ScrollView horizontal showsHorizontalScrollIndicator={false}>
+    <View style={{flexDirection:"row",gap:8}}>
+      {clients.map(c=>(<TouchableOpacity key={c.id} onPress={()=>setSelClient(c)}
+        style={{paddingHorizontal:14,paddingVertical:8,borderRadius:20,backgroundColor:selClient?.id===c.id?colors.primary:colors.surface,borderWidth:1,borderColor:selClient?.id===c.id?colors.primary:colors.border}}>
+        <Text style={{color:selClient?.id===c.id?"#fff":colors.foreground,fontWeight:"600"}}>👤 {c.name}</Text>
+      </TouchableOpacity>))}
+    </View>
+  </ScrollView>):null;
 
-  const getPct = (nutrientId: string) => {
-    const goal = clientGoals.find(g => g.id === nutrientId);
-    if (!goal || goal.dailyTarget === 0) return 0;
-    return Math.min((getTodayTotal(nutrientId) / goal.dailyTarget) * 100, 100);
-  };
-
-  const filteredFoods = selectedNutrient.foods.filter(f =>
-    f.toLowerCase().includes(searchFood.toLowerCase())
-  );
-
-  return (
-    <ScreenContainer>
-      <BackButton title="🔬 Mikro Besin Takibi" />
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 32 }}>
-
-        {/* Tabs */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            {[
-              { key: "overview", label: "📊 Özet" },
-              { key: "log", label: "➕ Kayıt Ekle" },
-              { key: "goals", label: role === "dietitian" ? "🎯 Hedef Belirle" : "🎯 Hedeflerim" },
-            ].map(tab => (
-              <TouchableOpacity key={tab.key} onPress={() => setActiveTab(tab.key as any)}
-                style={{
-                  paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20,
-                  backgroundColor: activeTab === tab.key ? colors.primary : colors.surface,
-                  borderWidth: 1, borderColor: activeTab === tab.key ? colors.primary : colors.border,
-                }}>
-                <Text style={{ color: activeTab === tab.key ? "#fff" : colors.foreground, fontWeight: "600" }}>
-                  {tab.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </ScrollView>
-
-        {/* Diyetisyen: danışan seçimi */}
-        {role === "dietitian" && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {SAMPLE_CLIENTS.map(c => (
-                <TouchableOpacity key={c.id} onPress={() => setSelectedClient(c)}
-                  style={{
-                    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-                    backgroundColor: selectedClient.id === c.id ? colors.primary : colors.surface,
-                    borderWidth: 1, borderColor: selectedClient.id === c.id ? colors.primary : colors.border,
-                  }}>
-                  <Text style={{ color: selectedClient.id === c.id ? "#fff" : colors.foreground, fontWeight: "600" }}>
-                    👤 {c.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
-        )}
-
-        {/* ÖZET */}
-        {activeTab === "overview" && (
-          <>
-            <Text style={{ color: colors.muted, fontSize: 13 }}>Bugünkü mikro besin alımı</Text>
-            {clientGoals.map(goal => {
-              const total = getTodayTotal(goal.id);
-              const pct = getPct(goal.id);
-              return (
-                <View key={goal.id} style={{
-                  backgroundColor: colors.surface, borderRadius: 12, padding: 14, gap: 8,
-                  borderWidth: 1, borderColor: pct >= 100 ? "#22c55e" : colors.border,
-                }}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                    <Text style={{ fontWeight: "700", color: colors.foreground }}>
-                      {goal.icon} {goal.nutrient}
-                    </Text>
-                    <Text style={{ color: pct >= 100 ? "#22c55e" : colors.primary, fontWeight: "700" }}>
-                      {total}/{goal.dailyTarget} {goal.unit}
-                    </Text>
-                  </View>
-                  <View style={{ height: 8, backgroundColor: colors.border, borderRadius: 4 }}>
-                    <View style={{
-                      height: 8, borderRadius: 4, width: `${pct}%`,
-                      backgroundColor: pct >= 100 ? "#22c55e" : pct >= 60 ? "#f97316" : "#ef4444",
-                    }} />
-                  </View>
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{pct.toFixed(0)}% tamamlandı</Text>
-                </View>
-              );
-            })}
-
-            {clientGoals.length === 0 && (
-              <Text style={{ color: colors.muted, textAlign: "center" }}>
-                {role === "dietitian" ? "Bu danışan için hedef belirlenmedi." : "Diyetisyeniniz henüz hedef belirlemedi."}
-              </Text>
-            )}
-          </>
-        )}
-
-        {/* KAYIT EKLE */}
-        {activeTab === "log" && (
-          <>
-            <Text style={{ color: colors.muted, fontSize: 13 }}>Yediğiniz besin kaynağını seçin ve miktarını girin</Text>
-
-            {/* Besin seçimi */}
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-              {NUTRIENTS.map(n => (
-                <TouchableOpacity key={n.id} onPress={() => { setSelectedNutrient(n); setSearchFood(""); setSelectedFood(""); setShowLogModal(true); }}
-                  style={{
-                    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
-                    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
-                    flexDirection: "row", alignItems: "center", gap: 6,
-                  }}>
-                  <Text style={{ fontSize: 18 }}>{n.icon}</Text>
-                  <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 13 }}>{n.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Bugünkü Kayıtlar */}
-            {todayLogs.length > 0 && (
-              <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border, gap: 8 }}>
-                <Text style={{ fontWeight: "700", color: colors.foreground }}>📋 Bugünkü Kayıtlar</Text>
-                {todayLogs.map(log => (
-                  <View key={log.id} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                    <Text style={{ color: colors.foreground }}>{log.nutrient} — {log.foodSource}</Text>
-                    <Text style={{ color: colors.primary, fontWeight: "600" }}>{log.amount}{log.unit}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </>
-        )}
-
-        {/* HEDEFLER */}
-        {activeTab === "goals" && (
-          <>
-            {role === "dietitian" && (
-              <Text style={{ color: colors.muted, fontSize: 13 }}>
-                {selectedClient.name} için günlük hedefleri belirleyin
-              </Text>
-            )}
-            {NUTRIENTS.map(n => {
-              const goal = clientGoals.find(g => g.id === n.id);
-              const [tempVal, setTempVal] = useState(String(goal?.dailyTarget ?? n.defaultTarget));
-              return (
-                <View key={n.id} style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border, flexDirection: "row", alignItems: "center", gap: 10 }}>
-                  <Text style={{ fontSize: 24 }}>{n.icon}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontWeight: "700", color: colors.foreground }}>{n.name}</Text>
-                    <Text style={{ color: colors.muted, fontSize: 12 }}>Hedef: {goal?.dailyTarget ?? n.defaultTarget} {n.unit}/gün</Text>
-                  </View>
-                  {role === "dietitian" && (
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <TextInput
-                        value={tempVal}
-                        onChangeText={setTempVal}
-                        keyboardType="numeric"
-                        style={{
-                          borderWidth: 1, borderColor: colors.border, borderRadius: 8,
-                          padding: 6, color: colors.foreground, backgroundColor: colors.background,
-                          width: 70, textAlign: "center",
-                        }}
-                      />
-                      <TouchableOpacity onPress={() => setGoalTarget(n.id, Number(tempVal))}
-                        style={{ paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.primary }}>
-                        <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>Kaydet</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
-              );
-            })}
-          </>
-        )}
+  return(<ScreenContainer>
+    <BackButton title="🔬 Mikro Besin Takibi"/>
+    <ScrollView contentContainerStyle={{padding:16,gap:14,paddingBottom:Math.max(insets.bottom+24,32)}}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={{flexDirection:"row",gap:8}}>
+          {[{k:"overview",l:"📊 Özet"},{k:"log",l:"➕ Kayıt Ekle"},{k:"goals",l:"🎯 Hedef Belirle"}].map(t=>(
+            <TouchableOpacity key={t.k} onPress={()=>setTab(t.k as any)}
+              style={{paddingHorizontal:16,paddingVertical:10,borderRadius:20,backgroundColor:tab===t.k?colors.primary:colors.surface,borderWidth:1,borderColor:tab===t.k?colors.primary:colors.border}}>
+              <Text style={{color:tab===t.k?"#fff":colors.foreground,fontWeight:"600"}}>{t.l}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </ScrollView>
+      <CS/>
 
-      {/* Kayıt Modal */}
-      <Modal visible={showLogModal} animationType="slide" transparent>
-        <View style={{ flex: 1, backgroundColor: "#00000080", justifyContent: "flex-end" }}>
-          <View style={{ backgroundColor: colors.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 14, maxHeight: "70%" }}>
-            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.foreground }}>
-              {selectedNutrient.icon} {selectedNutrient.name} Ekle
-            </Text>
-
-            {/* Besin Kaynağı Arama */}
-            <View style={{ gap: 8 }}>
-              <Text style={{ fontWeight: "600", color: colors.foreground }}>🍽️ Besin Kaynağı Seç</Text>
-              <TextInput value={searchFood} onChangeText={setSearchFood}
-                placeholder="Yemek ara..." placeholderTextColor={colors.muted}
-                style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.surface }} />
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={{ flexDirection: "row", gap: 8 }}>
-                  {filteredFoods.map(food => (
-                    <TouchableOpacity key={food} onPress={() => setSelectedFood(food)}
-                      style={{
-                        paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
-                        backgroundColor: selectedFood === food ? colors.primary : colors.surface,
-                        borderWidth: 1, borderColor: selectedFood === food ? colors.primary : colors.border,
-                      }}>
-                      <Text style={{ color: selectedFood === food ? "#fff" : colors.foreground, fontWeight: "600", fontSize: 13 }}>
-                        {food}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
+      {tab==="overview"&&(<>
+        <Text style={{color:colors.muted,fontSize:13}}>Bugünkü mikro besin alımı</Text>
+        {clientGoals.length===0?<Text style={{color:colors.muted,textAlign:"center",marginTop:20}}>{role==="dietitian"?"Henüz hedef belirlenmedi.":"Diyetisyeniniz henüz hedef belirlemedi."}</Text>
+          :clientGoals.map(g=>{const total=getTotal(g.nutrientId);const pct=g.dailyTarget>0?Math.min((total/g.dailyTarget)*100,100):0;return(
+            <View key={g.nutrientId} style={{backgroundColor:colors.surface,borderRadius:12,padding:14,gap:8,borderWidth:1,borderColor:pct>=100?"#22c55e":colors.border}}>
+              <View style={{flexDirection:"row",justifyContent:"space-between"}}>
+                <Text style={{fontWeight:"700",color:colors.foreground}}>{g.icon} {g.nutrient}</Text>
+                <Text style={{color:pct>=100?"#22c55e":colors.primary,fontWeight:"700"}}>{total}/{g.dailyTarget} {g.unit}</Text>
+              </View>
+              <View style={{height:8,backgroundColor:colors.border,borderRadius:4}}>
+                <View style={{height:8,borderRadius:4,width:`${pct}%`,backgroundColor:pct>=100?"#22c55e":pct>=60?"#f97316":"#ef4444"}}/>
+              </View>
+              <Text style={{color:colors.muted,fontSize:11}}>{pct.toFixed(0)}% tamamlandı</Text>
             </View>
+          );})}
+      </>)}
 
-            {/* Miktar */}
-            <View style={{ gap: 6 }}>
-              <Text style={{ fontWeight: "600", color: colors.foreground }}>
-                Miktar ({selectedNutrient.unit})
-              </Text>
-              <TextInput value={logAmount} onChangeText={setLogAmount}
-                placeholder={`${selectedNutrient.defaultTarget} ${selectedNutrient.unit}`}
-                keyboardType="numeric" placeholderTextColor={colors.muted}
-                style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.foreground, backgroundColor: colors.surface, fontSize: 16 }} />
-            </View>
+      {tab==="log"&&(<>
+        <Text style={{color:colors.muted,fontSize:13}}>Yediğiniz besini seçin — ilgili mikro besinler otomatik eklenir</Text>
+        <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
+          {NUTRIENTS.map(n=>(<TouchableOpacity key={n.id} onPress={()=>{setSelNutrient(n);setShowLogModal(true);}}
+            style={{paddingHorizontal:12,paddingVertical:8,borderRadius:10,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,flexDirection:"row",alignItems:"center",gap:6}}>
+            <Text style={{fontSize:18}}>{n.icon}</Text>
+            <Text style={{color:colors.foreground,fontWeight:"600",fontSize:13}}>{n.name}</Text>
+          </TouchableOpacity>))}
+        </View>
+        {todayLogs.length>0&&<View style={{backgroundColor:colors.surface,borderRadius:12,padding:14,borderWidth:1,borderColor:colors.border,gap:8}}>
+          <Text style={{fontWeight:"700",color:colors.foreground}}>📋 Bugünkü Kayıtlar</Text>
+          {todayLogs.map(l=>(<View key={l.id} style={{flexDirection:"row",justifyContent:"space-between",paddingVertical:4,borderBottomWidth:1,borderBottomColor:colors.border}}>
+            <Text style={{color:colors.foreground}}>{l.nutrient} — {l.foodSource}</Text>
+            <Text style={{color:colors.primary,fontWeight:"600"}}>{l.amount}{l.unit}</Text>
+          </View>))}
+        </View>}
+      </>)}
 
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <TouchableOpacity onPress={() => setShowLogModal(false)}
-                style={{ flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-                <Text style={{ color: colors.foreground }}>İptal</Text>
+      {tab==="goals"&&(<>
+        {role==="dietitian"?(<>
+          <Text style={{color:colors.muted,fontSize:13}}>Danışan ve besin seçerek hedef belirleyin. Hedef mesaj olarak danışana iletilir.</Text>
+          <TouchableOpacity onPress={()=>setShowGoalModal(true)} style={{paddingVertical:14,borderRadius:12,alignItems:"center",backgroundColor:colors.primary}}>
+            <Text style={{color:"#fff",fontWeight:"700",fontSize:15}}>+ Hedef Belirle</Text>
+          </TouchableOpacity>
+          {clientGoals.length===0?<Text style={{color:colors.muted,textAlign:"center"}}>{selClient?.name} için henüz hedef yok.</Text>
+            :clientGoals.map(g=>(<View key={g.nutrientId} style={{backgroundColor:colors.surface,borderRadius:12,padding:14,borderWidth:1,borderColor:colors.border,flexDirection:"row",alignItems:"center",gap:10}}>
+              <Text style={{fontSize:24}}>{g.icon}</Text>
+              <View style={{flex:1}}>
+                <Text style={{fontWeight:"700",color:colors.foreground}}>{g.nutrient}</Text>
+                <Text style={{color:colors.muted,fontSize:12}}>Günlük: {g.dailyTarget} {g.unit} · Haftalık: {g.weeklyTarget} {g.unit}</Text>
+              </View>
+              <TouchableOpacity onPress={()=>{setSelNutrient(NUTRIENTS.find(n=>n.id===g.nutrientId)??NUTRIENTS[0]);setGoalDaily(String(g.dailyTarget));setGoalWeekly(String(g.weeklyTarget));setShowGoalModal(true);}}>
+                <Text style={{color:colors.primary,fontSize:13}}>Düzenle</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={addLog}
-                style={{ flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: colors.primary }}>
-                <Text style={{ color: "#fff", fontWeight: "700" }}>✅ Kaydet</Text>
+            </View>))}
+        </>):(<>
+          <Text style={{color:colors.muted,fontSize:13}}>Diyetisyeninizin belirlediği hedefler</Text>
+          {clientGoals.length===0?<Text style={{color:colors.muted,textAlign:"center"}}>Henüz hedef belirlenmedi.</Text>
+            :clientGoals.map(g=>(<View key={g.nutrientId} style={{backgroundColor:colors.surface,borderRadius:12,padding:14,borderWidth:1,borderColor:colors.border}}>
+              <View style={{flexDirection:"row",justifyContent:"space-between"}}>
+                <Text style={{fontWeight:"700",color:colors.foreground}}>{g.icon} {g.nutrient}</Text>
+                <Text style={{color:colors.primary,fontWeight:"700"}}>Günlük: {g.dailyTarget} {g.unit}</Text>
+              </View>
+              <Text style={{color:colors.muted,fontSize:12,marginTop:4}}>Haftalık hedef: {g.weeklyTarget} {g.unit}</Text>
+            </View>))}
+        </>)}
+      </>)}
+    </ScrollView>
+
+    <Modal visible={showGoalModal} animationType="slide" transparent>
+      <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==="ios"?"padding":"height"}>
+        <View style={{flex:1,backgroundColor:"#00000080",justifyContent:"flex-end"}}>
+          <View style={{backgroundColor:colors.background,borderTopLeftRadius:20,borderTopRightRadius:20,padding:20,gap:14,paddingBottom:Math.max(insets.bottom+16,24)}}>
+            <Text style={{fontSize:18,fontWeight:"700",color:colors.foreground}}>🎯 Hedef Belirle</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={{flexDirection:"row",gap:8}}>
+                {clients.map(c=>(<TouchableOpacity key={c.id} onPress={()=>setSelClient(c)}
+                  style={{paddingHorizontal:14,paddingVertical:8,borderRadius:20,backgroundColor:selClient?.id===c.id?colors.primary:colors.surface,borderWidth:1,borderColor:selClient?.id===c.id?colors.primary:colors.border}}>
+                  <Text style={{color:selClient?.id===c.id?"#fff":colors.foreground,fontWeight:"600"}}>{c.name}</Text>
+                </TouchableOpacity>))}
+              </View>
+            </ScrollView>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={{flexDirection:"row",gap:8}}>
+                {NUTRIENTS.map(n=>(<TouchableOpacity key={n.id} onPress={()=>setSelNutrient(n)}
+                  style={{paddingHorizontal:12,paddingVertical:6,borderRadius:16,backgroundColor:selNutrient.id===n.id?colors.primary:colors.surface,borderWidth:1,borderColor:selNutrient.id===n.id?colors.primary:colors.border}}>
+                  <Text style={{color:selNutrient.id===n.id?"#fff":colors.foreground,fontSize:12,fontWeight:"600"}}>{n.icon} {n.name}</Text>
+                </TouchableOpacity>))}
+              </View>
+            </ScrollView>
+            <View style={{flexDirection:"row",gap:10}}>
+              <View style={{flex:1,gap:4}}>
+                <Text style={{fontWeight:"600",color:colors.foreground}}>Günlük ({selNutrient.unit})</Text>
+                <TextInput value={goalDaily} onChangeText={setGoalDaily} placeholder={String(selNutrient.defaultDaily)} keyboardType="numeric" placeholderTextColor={colors.muted}
+                  style={{borderWidth:1,borderColor:colors.border,borderRadius:10,padding:12,color:colors.foreground,backgroundColor:colors.surface}}/>
+              </View>
+              <View style={{flex:1,gap:4}}>
+                <Text style={{fontWeight:"600",color:colors.foreground}}>Haftalık ({selNutrient.unit})</Text>
+                <TextInput value={goalWeekly} onChangeText={setGoalWeekly} placeholder={String(selNutrient.defaultDaily*7)} keyboardType="numeric" placeholderTextColor={colors.muted}
+                  style={{borderWidth:1,borderColor:colors.border,borderRadius:10,padding:12,color:colors.foreground,backgroundColor:colors.surface}}/>
+              </View>
+            </View>
+            <View style={{flexDirection:"row",gap:8}}>
+              <TouchableOpacity onPress={()=>{setShowGoalModal(false);setGoalDaily("");setGoalWeekly("");}} style={{flex:1,paddingVertical:14,borderRadius:12,alignItems:"center",backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border}}>
+                <Text style={{color:colors.foreground}}>İptal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={saveGoal} style={{flex:2,paddingVertical:14,borderRadius:12,alignItems:"center",backgroundColor:colors.primary}}>
+                <Text style={{color:"#fff",fontWeight:"700"}}>✅ Kaydet ve Gönder</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
-      </Modal>
-    </ScreenContainer>
-  );
+      </KeyboardAvoidingView>
+    </Modal>
+
+    <Modal visible={showLogModal} animationType="slide" transparent>
+      <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==="ios"?"padding":"height"}>
+        <View style={{flex:1,backgroundColor:"#00000080",justifyContent:"flex-end"}}>
+          <View style={{backgroundColor:colors.background,borderTopLeftRadius:20,borderTopRightRadius:20,padding:20,gap:14,paddingBottom:Math.max(insets.bottom+16,24)}}>
+            <Text style={{fontSize:18,fontWeight:"700",color:colors.foreground}}>{selNutrient.icon} {selNutrient.name} Ekle</Text>
+            <View style={{gap:6}}>
+              <Text style={{fontWeight:"600",color:colors.foreground}}>🍽️ Besin Kaynağı</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{flexDirection:"row",gap:8}}>
+                  {selNutrient.foods.map(f=>(<TouchableOpacity key={f} onPress={()=>setLogFood(f)}
+                    style={{paddingHorizontal:12,paddingVertical:6,borderRadius:16,backgroundColor:logFood===f?colors.primary:colors.surface,borderWidth:1,borderColor:logFood===f?colors.primary:colors.border}}>
+                    <Text style={{color:logFood===f?"#fff":colors.foreground,fontWeight:"600",fontSize:13}}>{f}</Text>
+                  </TouchableOpacity>))}
+                </View>
+              </ScrollView>
+              {logFood&&FOOD_MAP[logFood]&&<Text style={{color:"#22c55e",fontSize:12}}>✅ {logFood} seçilince ilgili diğer besinler de otomatik eklenir</Text>}
+            </View>
+            <View style={{gap:4}}>
+              <Text style={{fontWeight:"600",color:colors.foreground}}>Miktar ({selNutrient.unit})</Text>
+              <TextInput value={logAmount} onChangeText={setLogAmount} placeholder={String(selNutrient.defaultDaily)} keyboardType="numeric" placeholderTextColor={colors.muted}
+                style={{borderWidth:1,borderColor:colors.border,borderRadius:10,padding:12,color:colors.foreground,backgroundColor:colors.surface,fontSize:16}}/>
+            </View>
+            <View style={{flexDirection:"row",gap:8}}>
+              <TouchableOpacity onPress={()=>{setShowLogModal(false);setLogAmount("");setLogFood("");}} style={{flex:1,paddingVertical:14,borderRadius:12,alignItems:"center",backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border}}>
+                <Text style={{color:colors.foreground}}>İptal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={addLog} style={{flex:2,paddingVertical:14,borderRadius:12,alignItems:"center",backgroundColor:colors.primary}}>
+                <Text style={{color:"#fff",fontWeight:"700"}}>✅ Kaydet</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  </ScreenContainer>);
 }
