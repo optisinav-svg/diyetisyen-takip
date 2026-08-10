@@ -1,296 +1,144 @@
-import { ScrollView, Text, View, TouchableOpacity, TextInput, Alert, Switch } from "react-native";
-import { ScreenContainer } from "@/components/screen-container";
-import { BackButton } from "@/components/back-button";
-import { useColors } from "@/hooks/use-colors";
-import { useState, useEffect } from "react";
+import {ScrollView,Text,View,TouchableOpacity,TextInput,Alert} from "react-native";
+import {ScreenContainer} from "@/components/screen-container";
+import {BackButton} from "@/components/back-button";
+import {useColors} from "@/hooks/use-colors";
+import {useState,useEffect} from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import {getMyClients,ClientRecord} from "@/lib/_core/clients-store";
+import {useSafeAreaInsets} from "react-native-safe-area-context";
 
-const CLIENTS_KEY = "dietitian_clients";
-const HEALTH_DATA_KEY = "client_health_data";
+const KEY="client_health_data_v2";
 
-interface Client {
-  id: string;
-  name: string;
-  email: string;
+interface HealthData{
+  clientId:string;height:number;weight:number;birthYear:number;gender:"male"|"female"|"other";
+  smoking:"none"|"daily"|"weekly"|"quit";smokingCount:number;
+  alcohol:"none"|"daily"|"weekly"|"occasional";alcoholGlasses:number;
+  allergies:string;medications:string;diseases:string;notes:string;
+  updatedAt:string;
 }
 
-interface HealthData {
-  clientId: string;
-  height: string;
-  weight: string;
-  age: string;
-  gender: string;
-  diabetes: boolean;
-  hypertension: boolean;
-  glutenSensitivity: boolean;
-  lactoseIntolerance: boolean;
-  heartDisease: boolean;
-  kidneyDisease: boolean;
-  thyroid: boolean;
-  otherConditions: string;
-  smokingStatus: "none" | "daily" | "weekly" | "quit";
-  smokingDaily: string;
-  smokingWeekly: string;
-  alcoholStatus: "none" | "daily" | "weekly" | "occasionally";
-  alcoholDaily: string;
-  alcoholWeekly: string;
-  bloodSugar: string;
-  cholesterol: string;
-  bloodPressure: string;
-  updatedAt: string;
-}
+export default function ClientHealthDataScreen(){
+  const colors=useColors();const insets=useSafeAreaInsets();
+  const [role,setRole]=useState<"dietitian"|"client">("client");
+  const [clients,setClients]=useState<ClientRecord[]>([]);
+  const [selClient,setSelClient]=useState<ClientRecord|null>(null);
+  const [data,setData]=useState<Partial<HealthData>>({smoking:"none",smokingCount:0,alcohol:"none",alcoholGlasses:0});
+  const [editMode,setEditMode]=useState(false);
 
-const SAMPLE_CLIENTS: Client[] = [
-  { id: "1", name: "Ayşe Yılmaz", email: "ayse@email.com" },
-  { id: "2", name: "Mehmet Demir", email: "mehmet@email.com" },
-  { id: "3", name: "Fatma Kaya", email: "fatma@email.com" },
-];
+  useEffect(()=>{load();},[]);
+  useEffect(()=>{if(selClient)loadClient(selClient.id);},[selClient]);
 
-const DEFAULT_HEALTH: Omit<HealthData, "clientId" | "updatedAt"> = {
-  height: "", weight: "", age: "", gender: "Kadın",
-  diabetes: false, hypertension: false, glutenSensitivity: false,
-  lactoseIntolerance: false, heartDisease: false, kidneyDisease: false,
-  thyroid: false, otherConditions: "",
-  bloodSugar: "", cholesterol: "", bloodPressure: "",
-};
-
-export default function ClientHealthData() {
-  const colors = useColors();
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  const [healthData, setHealthData] = useState<typeof DEFAULT_HEALTH>(DEFAULT_HEALTH);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (selectedClient) loadHealthData(selectedClient.id);
-  }, [selectedClient]);
-
-  const loadHealthData = async (clientId: string) => {
-    const saved = await AsyncStorage.getItem(`${HEALTH_DATA_KEY}_${clientId}`);
-    if (saved) {
-      const data = JSON.parse(saved);
-      setHealthData(data);
-    } else {
-      setHealthData(DEFAULT_HEALTH);
-    }
+  const load=async()=>{
+    const s=await AsyncStorage.getItem("session_v3");if(s)setRole(JSON.parse(s).role??"client");
+    const c=await getMyClients();setClients(c);if(c.length>0)setSelClient(c[0]);
+  };
+  const loadClient=async(cid:string)=>{
+    const d=await AsyncStorage.getItem(`${KEY}_${cid}`);
+    if(d)setData(JSON.parse(d));
+    else setData({smoking:"none",smokingCount:0,alcohol:"none",alcoholGlasses:0});
+  };
+  const save=async()=>{
+    if(!selClient&&role==="dietitian"){Alert.alert("Hata","Danışan seçin");return;}
+    const cid=role==="dietitian"?selClient!.id:"me";
+    const updated={...data,clientId:cid,updatedAt:new Date().toISOString()};
+    await AsyncStorage.setItem(`${KEY}_${cid}`,JSON.stringify(updated));
+    setData(updated);setEditMode(false);
+    Alert.alert("✅ Kaydedildi");
   };
 
-  const saveHealthData = async () => {
-    if (!selectedClient) return;
-    setSaving(true);
-    try {
-      const data = { ...healthData, clientId: selectedClient.id, updatedAt: new Date().toISOString() };
-      await AsyncStorage.setItem(`${HEALTH_DATA_KEY}_${selectedClient.id}`, JSON.stringify(data));
-      Alert.alert("Kaydedildi", `${selectedClient.name} sağlık verileri güncellendi.`);
-    } catch {
-      Alert.alert("Hata", "Kaydetme başarısız.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const update = (key: keyof typeof DEFAULT_HEALTH, value: any) => {
-    setHealthData(prev => ({ ...prev, [key]: value }));
-  };
-
-  const InputField = ({ label, field, keyboardType = "default", placeholder = "" }: any) => (
-    <View style={{ gap: 4 }}>
-      <Text style={{ fontSize: 13, fontWeight: "600", color: colors.foreground }}>{label}</Text>
-      <TextInput
-        value={healthData[field as keyof typeof DEFAULT_HEALTH] as string}
-        onChangeText={v => update(field, v)}
-        keyboardType={keyboardType}
-        placeholder={placeholder}
-        placeholderTextColor={colors.muted}
-        style={{
-          borderWidth: 1, borderColor: colors.border, borderRadius: 10,
-          padding: 12, color: colors.foreground, backgroundColor: colors.surface, fontSize: 14,
-        }}
-      />
+  const F=({label,value,onChange,keyboard="default",placeholder=""}:{label:string;value:string;onChange:(v:string)=>void;keyboard?:any;placeholder?:string})=>(
+    <View style={{gap:4}}>
+      <Text style={{fontSize:13,fontWeight:"600",color:colors.foreground}}>{label}</Text>
+      <TextInput value={value} onChangeText={onChange} keyboardType={keyboard} placeholder={placeholder} placeholderTextColor={colors.muted} editable={editMode||role==="client"}
+        style={{borderWidth:1,borderColor:editMode||role==="client"?colors.primary:colors.border,borderRadius:10,padding:12,color:colors.foreground,backgroundColor:editMode||role==="client"?colors.surface:colors.background,fontSize:14}}/>
     </View>
   );
 
-  const ToggleField = ({ label, field, icon }: any) => (
-    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8 }}>
-      <Text style={{ color: colors.foreground, fontSize: 14 }}>{icon} {label}</Text>
-      <Switch
-        value={healthData[field as keyof typeof DEFAULT_HEALTH] as boolean}
-        onValueChange={v => update(field, v)}
-        trackColor={{ false: colors.border, true: colors.primary }}
-      />
+  const SelBtn=({label,value,options,onChange}:{label:string;value:string;options:{k:string;l:string}[];onChange:(v:string)=>void})=>(
+    <View style={{gap:6}}>
+      <Text style={{fontSize:13,fontWeight:"600",color:colors.foreground}}>{label}</Text>
+      <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
+        {options.map(o=>(<TouchableOpacity key={o.k} onPress={()=>{if(editMode||role==="client")onChange(o.k);}}
+          style={{paddingHorizontal:14,paddingVertical:8,borderRadius:20,backgroundColor:value===o.k?colors.primary:colors.surface,borderWidth:1,borderColor:value===o.k?colors.primary:colors.border}}>
+          <Text style={{color:value===o.k?"#fff":colors.foreground,fontWeight:"600",fontSize:13}}>{o.l}</Text>
+        </TouchableOpacity>))}
+      </View>
     </View>
   );
 
-  if (!selectedClient) {
-    return (
-      <ScreenContainer>
-        <BackButton title="🩺 Danışan Sağlık Verileri" />
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
-          <Text style={{ color: colors.muted, fontSize: 13 }}>Sağlık bilgisi girilecek danışanı seçin</Text>
-          {SAMPLE_CLIENTS.map(client => (
-            <TouchableOpacity key={client.id} onPress={() => setSelectedClient(client)}
-              style={{
-                backgroundColor: colors.surface, borderRadius: 12, padding: 16,
-                borderWidth: 1, borderColor: colors.border, flexDirection: "row", alignItems: "center", gap: 12,
-              }}>
-              <Text style={{ fontSize: 28 }}>👤</Text>
-              <View>
-                <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>{client.name}</Text>
-                <Text style={{ fontSize: 13, color: colors.muted }}>{client.email}</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </ScreenContainer>
-    );
-  }
-
-  return (
-    <ScreenContainer>
-      <BackButton title={`🩺 ${selectedClient.name}`} onBack={() => setSelectedClient(null)} />
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 32 }}>
-
-        {/* Vücut Ölçüleri */}
-        <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, gap: 12, borderWidth: 1, borderColor: colors.border }}>
-          <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>📏 Vücut Ölçüleri</Text>
-          <InputField label="Boy (cm)" field="height" keyboardType="numeric" placeholder="örn: 165" />
-          <InputField label="Kilo (kg)" field="weight" keyboardType="numeric" placeholder="örn: 70" />
-          <InputField label="Yaş" field="age" keyboardType="numeric" placeholder="örn: 35" />
-          <View style={{ gap: 4 }}>
-            <Text style={{ fontSize: 13, fontWeight: "600", color: colors.foreground }}>Cinsiyet</Text>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {["Kadın", "Erkek"].map(g => (
-                <TouchableOpacity key={g} onPress={() => update("gender", g)}
-                  style={{
-                    flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center",
-                    backgroundColor: healthData.gender === g ? colors.primary : colors.surface,
-                    borderWidth: 1, borderColor: healthData.gender === g ? colors.primary : colors.border,
-                  }}>
-                  <Text style={{ color: healthData.gender === g ? "#fff" : colors.foreground, fontWeight: "600" }}>
-                    {g === "Kadın" ? "♀️ Kadın" : "♂️ Erkek"}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
+  return(<ScreenContainer>
+    <BackButton title="🩺 Danışan Sağlık Bilgileri"/>
+    <ScrollView contentContainerStyle={{padding:16,gap:14,paddingBottom:Math.max(insets.bottom+24,32)}}>
+      {role==="dietitian"&&<ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={{flexDirection:"row",gap:8}}>
+          {clients.map(c=>(<TouchableOpacity key={c.id} onPress={()=>setSelClient(c)}
+            style={{paddingHorizontal:14,paddingVertical:8,borderRadius:20,backgroundColor:selClient?.id===c.id?colors.primary:colors.surface,borderWidth:1,borderColor:selClient?.id===c.id?colors.primary:colors.border}}>
+            <Text style={{color:selClient?.id===c.id?"#fff":colors.foreground,fontWeight:"600"}}>👤 {c.name}</Text>
+          </TouchableOpacity>))}
         </View>
+      </ScrollView>}
 
-        {/* Hastalıklar */}
-        <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, gap: 4, borderWidth: 1, borderColor: colors.border }}>
-          <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground, marginBottom: 8 }}>🏥 Hastalıklar ve Hassasiyetler</Text>
-          <ToggleField label="Diyabet (Şeker)" field="diabetes" icon="🍬" />
-          <ToggleField label="Hipertansiyon (Tansiyon)" field="hypertension" icon="🩸" />
-          <ToggleField label="Gluten Hassasiyeti" field="glutenSensitivity" icon="🌾" />
-          <ToggleField label="Laktoz İntoleransı" field="lactoseIntolerance" icon="🥛" />
-          <ToggleField label="Kalp Hastalığı" field="heartDisease" icon="❤️" />
-          <ToggleField label="Böbrek Hastalığı" field="kidneyDisease" icon="🫘" />
-          <ToggleField label="Tiroid Bozukluğu" field="thyroid" icon="🦋" />
-          <View style={{ gap: 4, marginTop: 8 }}>
-            <Text style={{ fontSize: 13, fontWeight: "600", color: colors.foreground }}>Diğer Hastalıklar</Text>
-            <TextInput
-              value={healthData.otherConditions}
-              onChangeText={v => update("otherConditions", v)}
-              placeholder="Varsa diğer hastalıkları yazın..."
-              placeholderTextColor={colors.muted}
-              multiline
-              style={{
-                borderWidth: 1, borderColor: colors.border, borderRadius: 10,
-                padding: 12, color: colors.foreground, backgroundColor: colors.background,
-                minHeight: 70, fontSize: 14,
-              }}
-            />
-          </View>
-        </View>
-
-        {/* Sigara ve Alkol */}
-        <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, gap: 12, borderWidth: 1, borderColor: colors.border }}>
-          <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>🚬 Sigara Kullanımı</Text>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {([["none","Yok","⬜"],["daily","Her Gün","🔴"],["weekly","Haftalık","🟡"],["quit","Bıraktı","🟢"]] as const).map(([val, label, icon]) => (
-              <TouchableOpacity key={val} onPress={() => update("smokingStatus", val)}
-                style={{
-                  paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-                  backgroundColor: healthData.smokingStatus === val ? colors.primary : colors.surface,
-                  borderWidth: 1, borderColor: healthData.smokingStatus === val ? colors.primary : colors.border,
-                }}>
-                <Text style={{ color: healthData.smokingStatus === val ? "#fff" : colors.foreground, fontWeight: "600" }}>
-                  {icon} {label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {healthData.smokingStatus === "daily" && (
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text style={{ fontSize: 13, color: colors.muted }}>Günlük (adet)</Text>
-                <TextInput value={healthData.smokingDaily} onChangeText={v => update("smokingDaily", v)}
-                  keyboardType="numeric" placeholder="örn: 10" placeholderTextColor={colors.muted}
-                  style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.background }} />
-              </View>
-            </View>
-          )}
-          {healthData.smokingStatus === "weekly" && (
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={{ fontSize: 13, color: colors.muted }}>Haftalık (adet)</Text>
-              <TextInput value={healthData.smokingWeekly} onChangeText={v => update("smokingWeekly", v)}
-                keyboardType="numeric" placeholder="örn: 20" placeholderTextColor={colors.muted}
-                style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.background }} />
-            </View>
-          )}
-        </View>
-
-        <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, gap: 12, borderWidth: 1, borderColor: colors.border }}>
-          <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>🍷 Alkol Kullanımı</Text>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {([["none","Yok","⬜"],["daily","Her Gün","🔴"],["weekly","Haftalık","🟡"],["occasionally","Ara Sıra","🟢"]] as const).map(([val, label, icon]) => (
-              <TouchableOpacity key={val} onPress={() => update("alcoholStatus", val)}
-                style={{
-                  paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-                  backgroundColor: healthData.alcoholStatus === val ? colors.primary : colors.surface,
-                  borderWidth: 1, borderColor: healthData.alcoholStatus === val ? colors.primary : colors.border,
-                }}>
-                <Text style={{ color: healthData.alcoholStatus === val ? "#fff" : colors.foreground, fontWeight: "600" }}>
-                  {icon} {label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {healthData.alcoholStatus === "daily" && (
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={{ fontSize: 13, color: colors.muted }}>Günlük (kadeh/şişe)</Text>
-              <TextInput value={healthData.alcoholDaily} onChangeText={v => update("alcoholDaily", v)}
-                keyboardType="numeric" placeholder="örn: 2" placeholderTextColor={colors.muted}
-                style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.background }} />
-            </View>
-          )}
-          {healthData.alcoholStatus === "weekly" && (
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={{ fontSize: 13, color: colors.muted }}>Haftalık (kadeh/şişe)</Text>
-              <TextInput value={healthData.alcoholWeekly} onChangeText={v => update("alcoholWeekly", v)}
-                keyboardType="numeric" placeholder="örn: 5" placeholderTextColor={colors.muted}
-                style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.background }} />
-            </View>
-          )}
-        </View>
-
-        {/* Sağlık Kartları */}
-        <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, gap: 12, borderWidth: 1, borderColor: colors.border }}>
-          <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>💉 Sağlık Değerleri</Text>
-          <InputField label="Kan Şekeri (mg/dL)" field="bloodSugar" keyboardType="numeric" placeholder="örn: 95" />
-          <InputField label="Kolesterol (mg/dL)" field="cholesterol" keyboardType="numeric" placeholder="örn: 180" />
-          <InputField label="Tansiyon (mmHg)" field="bloodPressure" placeholder="örn: 120/80" />
-        </View>
-
-        {/* Kaydet */}
-        <TouchableOpacity onPress={saveHealthData} disabled={saving}
-          style={{
-            paddingVertical: 16, borderRadius: 12, alignItems: "center",
-            backgroundColor: colors.primary, opacity: saving ? 0.7 : 1,
-          }}>
-          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>
-            {saving ? "Kaydediliyor..." : "💾 Kaydet"}
-          </Text>
+      {role==="dietitian"&&<View style={{flexDirection:"row",gap:8}}>
+        <TouchableOpacity onPress={()=>setEditMode(!editMode)}
+          style={{flex:1,paddingVertical:12,borderRadius:10,alignItems:"center",backgroundColor:editMode?colors.primary:colors.surface,borderWidth:1,borderColor:editMode?colors.primary:colors.border}}>
+          <Text style={{color:editMode?"#fff":colors.foreground,fontWeight:"600"}}>{editMode?"✏️ Düzenleniyor":"✏️ Düzenle"}</Text>
         </TouchableOpacity>
-      </ScrollView>
-    </ScreenContainer>
-  );
+        {editMode&&<TouchableOpacity onPress={save}
+          style={{flex:2,paddingVertical:12,borderRadius:10,alignItems:"center",backgroundColor:"#22c55e"}}>
+          <Text style={{color:"#fff",fontWeight:"700"}}>💾 Kaydet</Text>
+        </TouchableOpacity>}
+      </View>}
+
+      {/* Temel Bilgiler */}
+      <View style={{backgroundColor:colors.surface,borderRadius:12,padding:16,borderWidth:1,borderColor:colors.border,gap:12}}>
+        <Text style={{fontSize:16,fontWeight:"700",color:colors.foreground}}>📋 Temel Bilgiler</Text>
+        <View style={{flexDirection:"row",gap:10}}>
+          <View style={{flex:1}}><F label="Boy (cm)" value={String(data.height??"")} onChange={v=>setData(p=>({...p,height:Number(v)}))} keyboard="numeric" placeholder="175"/></View>
+          <View style={{flex:1}}><F label="Kilo (kg)" value={String(data.weight??"")} onChange={v=>setData(p=>({...p,weight:Number(v)}))} keyboard="numeric" placeholder="70"/></View>
+        </View>
+        <View style={{flexDirection:"row",gap:10}}>
+          <View style={{flex:1}}><F label="Doğum Yılı" value={String(data.birthYear??"")} onChange={v=>setData(p=>({...p,birthYear:Number(v)}))} keyboard="numeric" placeholder="1990"/></View>
+          <View style={{flex:1}}>
+            <SelBtn label="Cinsiyet" value={data.gender??"other"} options={[{k:"female",l:"♀️ Kadın"},{k:"male",l:"♂️ Erkek"},{k:"other",l:"Diğer"}]} onChange={v=>setData(p=>({...p,gender:v as any}))}/>
+          </View>
+        </View>
+      </View>
+
+      {/* Sigara */}
+      <View style={{backgroundColor:colors.surface,borderRadius:12,padding:16,borderWidth:1,borderColor:colors.border,gap:12}}>
+        <Text style={{fontSize:16,fontWeight:"700",color:colors.foreground}}>🚬 Sigara Kullanımı</Text>
+        <SelBtn label="" value={data.smoking??"none"} options={[{k:"none",l:"🚭 Kullanmıyor"},{k:"daily",l:"📅 Günlük"},{k:"weekly",l:"📆 Haftalık"},{k:"quit",l:"✅ Bıraktı"}]} onChange={v=>setData(p=>({...p,smoking:v as any}))}/>
+        {(data.smoking==="daily"||data.smoking==="weekly")&&<F label={`Günlük Adet`} value={String(data.smokingCount??"")} onChange={v=>setData(p=>({...p,smokingCount:Number(v)}))} keyboard="numeric" placeholder="10"/>}
+      </View>
+
+      {/* Alkol */}
+      <View style={{backgroundColor:colors.surface,borderRadius:12,padding:16,borderWidth:1,borderColor:colors.border,gap:12}}>
+        <Text style={{fontSize:16,fontWeight:"700",color:colors.foreground}}>🍷 Alkol Kullanımı</Text>
+        <SelBtn label="" value={data.alcohol??"none"} options={[{k:"none",l:"🚫 Kullanmıyor"},{k:"daily",l:"📅 Günlük"},{k:"weekly",l:"📆 Haftalık"},{k:"occasional",l:"🎉 Ara Sıra"}]} onChange={v=>setData(p=>({...p,alcohol:v as any}))}/>
+        {data.alcohol!=="none"&&<F label="Ortalama Kadeh (haftalık)" value={String(data.alcoholGlasses??"")} onChange={v=>setData(p=>({...p,alcoholGlasses:Number(v)}))} keyboard="numeric" placeholder="2"/>}
+      </View>
+
+      {/* Sağlık */}
+      <View style={{backgroundColor:colors.surface,borderRadius:12,padding:16,borderWidth:1,borderColor:colors.border,gap:12}}>
+        <Text style={{fontSize:16,fontWeight:"700",color:colors.foreground}}>🏥 Hastalık ve İlaç</Text>
+        <F label="Mevcut Hastalıklar" value={data.diseases??""} onChange={v=>setData(p=>({...p,diseases:v}))} placeholder="Diyabet, hipertansiyon..."/>
+        <F label="Kullandığı İlaçlar" value={data.medications??""} onChange={v=>setData(p=>({...p,medications:v}))} placeholder="İlaç adı ve dozu..."/>
+        <F label="Alerjiler" value={data.allergies??""} onChange={v=>setData(p=>({...p,allergies:v}))} placeholder="Fıstık, süt, gluten..."/>
+      </View>
+
+      {/* Notlar */}
+      <View style={{backgroundColor:colors.surface,borderRadius:12,padding:16,borderWidth:1,borderColor:colors.border,gap:8}}>
+        <Text style={{fontSize:16,fontWeight:"700",color:colors.foreground}}>📝 Ek Notlar</Text>
+        <TextInput value={data.notes??""} onChangeText={v=>setData(p=>({...p,notes:v}))} placeholder="Ek bilgiler..." multiline editable={editMode||role==="client"} placeholderTextColor={colors.muted}
+          style={{borderWidth:1,borderColor:colors.border,borderRadius:10,padding:12,color:colors.foreground,backgroundColor:colors.surface,minHeight:80,textAlignVertical:"top"}}/>
+      </View>
+
+      {data.updatedAt&&<Text style={{color:colors.muted,fontSize:12,textAlign:"center"}}>Son güncelleme: {new Date(data.updatedAt).toLocaleDateString("tr-TR")}</Text>}
+
+      {role==="client"&&<TouchableOpacity onPress={save}
+        style={{paddingVertical:16,borderRadius:12,alignItems:"center",backgroundColor:colors.primary}}>
+        <Text style={{color:"#fff",fontWeight:"700",fontSize:16}}>💾 Kaydet</Text>
+      </TouchableOpacity>}
+    </ScrollView>
+  </ScreenContainer>);
 }
