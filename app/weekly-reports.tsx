@@ -1,179 +1,142 @@
-import { BackButton } from "@/components/back-button";
-import { ScrollView, Text, View, TouchableOpacity, Alert } from "react-native";
-import { ScreenContainer } from "@/components/screen-container";
-import { useColors } from "@/hooks/use-colors";
-import { useEffect, useState } from "react";
-import { getUserRegistration } from "@/lib/_core/user-registration";
+import {ScrollView,Text,View,TouchableOpacity} from "react-native";
+import {ScreenContainer} from "@/components/screen-container";
+import {BackButton} from "@/components/back-button";
+import {useColors} from "@/hooks/use-colors";
+import {useState,useEffect} from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import {getMyClients,ClientRecord} from "@/lib/_core/clients-store";
+import {useSafeAreaInsets} from "react-native-safe-area-context";
 
-interface WeeklyReport {
-  id: string;
-  weekStart: string;
-  weekEnd: string;
-  clientName: string;
-  avgCalories: number;
-  avgProtein: number;
-  avgWater: number;
-  avgSteps: number;
-  avgSleep: number;
-  adherenceRate: number;
-  weightChange: number;
-  summary: string;
-}
+const DAYS=["Pzt","Sal","Çar","Per","Cum","Cmt","Paz"];
 
-const SAMPLE_REPORTS: WeeklyReport[] = [
-  {
-    id: "1", weekStart: "2026-06-02", weekEnd: "2026-06-08",
-    clientName: "Ayşe Yılmaz", avgCalories: 1850, avgProtein: 142,
-    avgWater: 1800, avgSteps: 8234, avgSleep: 7.2, adherenceRate: 88,
-    weightChange: -0.5, summary: "Kalori hedefine %88 uyum sağlandı. Su tüketimi artırılmalı.",
-  },
-  {
-    id: "2", weekStart: "2026-05-26", weekEnd: "2026-06-01",
-    clientName: "Ayşe Yılmaz", avgCalories: 1920, avgProtein: 155,
-    avgWater: 2000, avgSteps: 9100, avgSleep: 7.5, adherenceRate: 92,
-    weightChange: -0.3, summary: "Mükemmel bir hafta! Tüm hedefler neredeyse tam olarak tutturuldu.",
-  },
-  {
-    id: "3", weekStart: "2026-06-02", weekEnd: "2026-06-08",
-    clientName: "Mehmet Demir", avgCalories: 2100, avgProtein: 168,
-    avgWater: 1600, avgSteps: 11000, avgSleep: 6.8, adherenceRate: 75,
-    weightChange: 0.2, summary: "Aktivite yüksek ama uyku süresi yetersiz. Su alımı artırılmalı.",
-  },
-];
+export default function WeeklyReportsScreen(){
+  const colors=useColors();const insets=useSafeAreaInsets();
+  const [role,setRole]=useState<"dietitian"|"client">("client");
+  const [clients,setClients]=useState<ClientRecord[]>([]);
+  const [selClient,setSelClient]=useState<ClientRecord|null>(null);
+  const [selWeek,setSelWeek]=useState(0);// 0=bu hafta, -1=geçen hafta
 
-export default function WeeklyReportsScreen() {
-  const colors = useColors();
-  const [role, setRole] = useState<"dietitian" | "client">("client");
-  const [selectedClient, setSelectedClient] = useState("Ayşe Yılmaz");
-  const [selectedReport, setSelectedReport] = useState<WeeklyReport | null>(null);
-
-  const CLIENTS = ["Ayşe Yılmaz", "Mehmet Demir", "Fatma Kaya"];
-
-  useEffect(() => { loadUser(); }, []);
-  const loadUser = async () => {
-    const user = await getUserRegistration();
-    setRole(user?.role ?? "client");
+  useEffect(()=>{load();},[]);
+  const load=async()=>{
+    const s=await AsyncStorage.getItem("session_v3");if(s)setRole(JSON.parse(s).role??"client");
+    const c=await getMyClients();setClients(c);if(c.length>0)setSelClient(c[0]);
   };
 
-  const visibleReports = role === "dietitian"
-    ? SAMPLE_REPORTS.filter(r => r.clientName === selectedClient)
-    : SAMPLE_REPORTS.filter(r => r.clientName === "Ayşe Yılmaz");
+  // Simulated weekly data
+  const getWeekData=(weekOffset:number)=>{
+    const base=weekOffset===0?[82,75,90,65,88,70,80]:[75,80,70,85,72,68,78];
+    return{
+      adherence:base,
+      calories:[1850,1920,1780,2050,1900,1750,2100],
+      water:[1800,2000,1600,2200,1900,1500,2100],
+      steps:[7500,8200,6800,9100,8500,5500,10200],
+      sleep:[7.0,6.5,7.5,8.0,7.0,8.5,7.5],
+      avgAdherence:Math.round(base.reduce((a:number,b:number)=>a+b,0)/7),
+    };
+  };
+  const data=getWeekData(selWeek);
+  const maxVal=(arr:number[])=>Math.max(...arr);
 
-  if (selectedReport) {
-    return (
-      <ScreenContainer>
-        <BackButton title="Haftalık Rapor" onBack={() => setSelectedReport(null)} />
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 32 }}>
-          <View style={{ backgroundColor: colors.primary + "20", borderRadius: 12, padding: 16, borderWidth: 1, borderColor: colors.primary }}>
-            <Text style={{ fontSize: 16, fontWeight: "700", color: colors.primary }}>
-              📅 {selectedReport.weekStart} — {selectedReport.weekEnd}
-            </Text>
-            <Text style={{ color: colors.foreground, marginTop: 4 }}>👤 {selectedReport.clientName}</Text>
-          </View>
+  const BarChart=({values,color,unit,height=80}:{values:number[];color:string;unit:string;height?:number})=>{
+    const max=maxVal(values);
+    return(<View style={{flexDirection:"row",alignItems:"flex-end",height:height+20,gap:4}}>
+      {values.map((v,i)=>(
+        <View key={i} style={{flex:1,alignItems:"center",gap:2}}>
+          <Text style={{fontSize:8,color:colors.primary}}>{v>999?`${(v/1000).toFixed(1)}k`:v}</Text>
+          <View style={{width:"100%",borderRadius:3,backgroundColor:color,height:Math.max((v/max)*height,3)}}/>
+          <Text style={{fontSize:9,color:colors.muted}}>{DAYS[i]}</Text>
+        </View>
+      ))}
+    </View>);
+  };
 
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-            {[
-              { icon: "🔥", label: "Ort. Kalori", value: `${selectedReport.avgCalories} kcal` },
-              { icon: "🥩", label: "Ort. Protein", value: `${selectedReport.avgProtein}g` },
-              { icon: "💧", label: "Ort. Su", value: `${selectedReport.avgWater}ml` },
-              { icon: "👟", label: "Ort. Adım", value: selectedReport.avgSteps.toLocaleString() },
-              { icon: "😴", label: "Ort. Uyku", value: `${selectedReport.avgSleep} saat` },
-              { icon: "⚖️", label: "Kilo Değişim", value: `${selectedReport.weightChange > 0 ? "+" : ""}${selectedReport.weightChange} kg` },
-            ].map(item => (
-              <View key={item.label} style={{
-                width: "47%", backgroundColor: colors.surface, borderRadius: 10, padding: 12,
-                borderWidth: 1, borderColor: colors.border, gap: 4,
-              }}>
-                <Text style={{ fontSize: 20 }}>{item.icon}</Text>
-                <Text style={{ fontSize: 16, fontWeight: "bold", color: colors.primary }}>{item.value}</Text>
-                <Text style={{ fontSize: 11, color: colors.muted }}>{item.label}</Text>
-              </View>
-            ))}
-          </View>
+  const now=new Date();
+  const weekStart=new Date(now);weekStart.setDate(now.getDate()-now.getDay()+1+(selWeek*7));
+  const weekEnd=new Date(weekStart);weekEnd.setDate(weekStart.getDate()+6);
+  const fmt=(d:Date)=>`${d.getDate()}.${d.getMonth()+1}`;
 
-          <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: colors.border, gap: 8 }}>
-            <Text style={{ fontWeight: "700", color: colors.foreground }}>🎯 Uyum Oranı</Text>
-            <Text style={{ fontSize: 32, fontWeight: "bold", color: selectedReport.adherenceRate >= 85 ? "#22c55e" : selectedReport.adherenceRate >= 70 ? "#f97316" : "#ef4444" }}>
-              {selectedReport.adherenceRate}%
-            </Text>
-            <View style={{ height: 12, backgroundColor: colors.border, borderRadius: 6 }}>
-              <View style={{
-                height: 12, borderRadius: 6, width: `${selectedReport.adherenceRate}%`,
-                backgroundColor: selectedReport.adherenceRate >= 85 ? "#22c55e" : selectedReport.adherenceRate >= 70 ? "#f97316" : "#ef4444",
-              }} />
+  return(<ScreenContainer>
+    <BackButton title="📅 Haftalık Rapor"/>
+    <ScrollView contentContainerStyle={{padding:16,gap:14,paddingBottom:Math.max(insets.bottom+24,32)}}>
+      {role==="dietitian"&&<ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={{flexDirection:"row",gap:8}}>
+          {clients.map(c=>(<TouchableOpacity key={c.id} onPress={()=>setSelClient(c)}
+            style={{paddingHorizontal:14,paddingVertical:8,borderRadius:20,backgroundColor:selClient?.id===c.id?colors.primary:colors.surface,borderWidth:1,borderColor:selClient?.id===c.id?colors.primary:colors.border}}>
+            <Text style={{color:selClient?.id===c.id?"#fff":colors.foreground,fontWeight:"600"}}>👤 {c.name}</Text>
+          </TouchableOpacity>))}
+        </View>
+      </ScrollView>}
+
+      {/* Hafta seçimi */}
+      <View style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center",backgroundColor:colors.surface,borderRadius:12,padding:12,borderWidth:1,borderColor:colors.border}}>
+        <TouchableOpacity onPress={()=>setSelWeek(w=>w-1)} style={{padding:8}}>
+          <Text style={{color:colors.primary,fontSize:18,fontWeight:"700"}}>←</Text>
+        </TouchableOpacity>
+        <Text style={{fontWeight:"700",color:colors.foreground}}>{selWeek===0?"Bu Hafta":selWeek===-1?"Geçen Hafta":`${Math.abs(selWeek)} Hafta Önce`}{"\n"}<Text style={{fontSize:12,fontWeight:"400",color:colors.muted}}>{fmt(weekStart)} - {fmt(weekEnd)}</Text></Text>
+        <TouchableOpacity onPress={()=>setSelWeek(w=>Math.min(w+1,0))} disabled={selWeek===0} style={{padding:8}}>
+          <Text style={{color:selWeek===0?colors.muted:colors.primary,fontSize:18,fontWeight:"700"}}>→</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Genel Uyum */}
+      <View style={{backgroundColor:colors.surface,borderRadius:12,padding:16,borderWidth:2,borderColor:data.avgAdherence>=80?"#22c55e":"#f97316",gap:8}}>
+        <Text style={{fontWeight:"700",color:colors.foreground,fontSize:16}}>🎯 Haftalık Uyum Oranı</Text>
+        <Text style={{fontSize:48,fontWeight:"bold",color:data.avgAdherence>=80?"#22c55e":"#f97316",textAlign:"center"}}>{data.avgAdherence}%</Text>
+        <View style={{height:12,backgroundColor:colors.border,borderRadius:6}}>
+          <View style={{height:12,backgroundColor:data.avgAdherence>=80?"#22c55e":"#f97316",borderRadius:6,width:`${data.avgAdherence}%`}}/>
+        </View>
+        <Text style={{color:colors.muted,textAlign:"center",fontSize:13}}>
+          {data.avgAdherence>=85?"🌟 Mükemmel hafta!":data.avgAdherence>=70?"👍 İyi bir hafta, devam edin!":"💪 Daha iyi yapabilirsiniz!"}
+        </Text>
+      </View>
+
+      {/* Günlük Uyum Grafiği */}
+      <View style={{backgroundColor:colors.surface,borderRadius:12,padding:16,borderWidth:1,borderColor:colors.border,gap:8}}>
+        <Text style={{fontWeight:"700",color:colors.foreground}}>📊 Günlük Uyum (%)</Text>
+        <BarChart values={data.adherence} color={colors.primary} unit="%"/>
+      </View>
+
+      {/* Kalori */}
+      <View style={{backgroundColor:colors.surface,borderRadius:12,padding:16,borderWidth:1,borderColor:colors.border,gap:8}}>
+        <Text style={{fontWeight:"700",color:colors.foreground}}>🔥 Günlük Kalori (kcal)</Text>
+        <BarChart values={data.calories} color="#f97316" unit="kcal"/>
+        <Text style={{color:colors.muted,fontSize:12,textAlign:"center"}}>Haftalık ort: {Math.round(data.calories.reduce((a,b)=>a+b,0)/7)} kcal</Text>
+      </View>
+
+      {/* Su */}
+      <View style={{backgroundColor:colors.surface,borderRadius:12,padding:16,borderWidth:1,borderColor:colors.border,gap:8}}>
+        <Text style={{fontWeight:"700",color:colors.foreground}}>💧 Su Tüketimi (ml)</Text>
+        <BarChart values={data.water} color="#3b82f6" unit="ml"/>
+        <Text style={{color:colors.muted,fontSize:12,textAlign:"center"}}>Haftalık ort: {Math.round(data.water.reduce((a,b)=>a+b,0)/7)} ml</Text>
+      </View>
+
+      {/* Adım */}
+      <View style={{backgroundColor:colors.surface,borderRadius:12,padding:16,borderWidth:1,borderColor:colors.border,gap:8}}>
+        <Text style={{fontWeight:"700",color:colors.foreground}}>👟 Günlük Adım</Text>
+        <BarChart values={data.steps} color="#22c55e" unit="adım" height={100}/>
+        <Text style={{color:colors.muted,fontSize:12,textAlign:"center"}}>Haftalık ort: {Math.round(data.steps.reduce((a,b)=>a+b,0)/7).toLocaleString("tr-TR")} adım</Text>
+      </View>
+
+      {/* Uyku */}
+      <View style={{backgroundColor:colors.surface,borderRadius:12,padding:16,borderWidth:1,borderColor:colors.border,gap:8}}>
+        <Text style={{fontWeight:"700",color:colors.foreground}}>😴 Uyku (saat)</Text>
+        <BarChart values={data.sleep} color="#8b5cf6" unit="saat"/>
+        <Text style={{color:colors.muted,fontSize:12,textAlign:"center"}}>Haftalık ort: {(data.sleep.reduce((a,b)=>a+b,0)/7).toFixed(1)} saat</Text>
+      </View>
+
+      {/* Özet */}
+      <View style={{backgroundColor:"#22c55e20",borderRadius:12,padding:16,borderWidth:1,borderColor:"#22c55e",gap:8}}>
+        <Text style={{fontWeight:"700",color:"#22c55e",fontSize:16}}>📋 Haftalık Özet</Text>
+        {[{icon:"🎯",l:"Uyum",v:`${data.avgAdherence}%`,ok:data.avgAdherence>=75},{icon:"🔥",l:"Ort. Kalori",v:`${Math.round(data.calories.reduce((a,b)=>a+b,0)/7)} kcal`,ok:true},{icon:"💧",l:"Ort. Su",v:`${Math.round(data.water.reduce((a,b)=>a+b,0)/7)} ml`,ok:Math.round(data.water.reduce((a,b)=>a+b,0)/7)>=1800},{icon:"👟",l:"Ort. Adım",v:`${Math.round(data.steps.reduce((a,b)=>a+b,0)/7).toLocaleString("tr-TR")}`,ok:Math.round(data.steps.reduce((a,b)=>a+b,0)/7)>=8000},{icon:"😴",l:"Ort. Uyku",v:`${(data.sleep.reduce((a,b)=>a+b,0)/7).toFixed(1)} saat`,ok:(data.sleep.reduce((a,b)=>a+b,0)/7)>=7}].map(item=>(
+          <View key={item.l} style={{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingVertical:4}}>
+            <Text style={{color:colors.foreground}}>{item.icon} {item.l}</Text>
+            <View style={{flexDirection:"row",alignItems:"center",gap:6}}>
+              <Text style={{fontWeight:"700",color:item.ok?"#22c55e":"#f97316"}}>{item.v}</Text>
+              <Text>{item.ok?"✅":"⚠️"}</Text>
             </View>
           </View>
-
-          <View style={{ backgroundColor: colors.surface, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ fontWeight: "700", color: colors.foreground, marginBottom: 8 }}>💬 Haftalık Özet</Text>
-            <Text style={{ color: colors.foreground, lineHeight: 22 }}>{selectedReport.summary}</Text>
-          </View>
-
-          <TouchableOpacity onPress={() => Alert.alert("Paylaşıldı", "Rapor paylaşıldı.")}
-            style={{ paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: colors.primary }}>
-            <Text style={{ color: "#fff", fontWeight: "700" }}>📤 Raporu Paylaş</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </ScreenContainer>
-    );
-  }
-
-  return (
-    <ScreenContainer>
-      <BackButton title="📅 Haftalık Raporlar" />
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 32 }}>
-
-        {role === "dietitian" && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {CLIENTS.map(c => (
-                <TouchableOpacity key={c} onPress={() => setSelectedClient(c)}
-                  style={{
-                    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-                    backgroundColor: selectedClient === c ? colors.primary : colors.surface,
-                    borderWidth: 1, borderColor: selectedClient === c ? colors.primary : colors.border,
-                  }}>
-                  <Text style={{ color: selectedClient === c ? "#fff" : colors.foreground, fontWeight: "600" }}>👤 {c}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
-        )}
-
-        {visibleReports.length === 0 ? (
-          <Text style={{ color: colors.muted, textAlign: "center", marginTop: 20 }}>Henüz rapor yok.</Text>
-        ) : visibleReports.map(report => (
-          <TouchableOpacity key={report.id} onPress={() => setSelectedReport(report)}
-            style={{
-              backgroundColor: colors.surface, borderRadius: 12, padding: 16, gap: 8,
-              borderWidth: 1, borderColor: colors.border,
-            }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-              <View>
-                <Text style={{ fontWeight: "700", color: colors.foreground }}>
-                  📅 {report.weekStart} — {report.weekEnd}
-                </Text>
-                {role === "dietitian" && (
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>👤 {report.clientName}</Text>
-                )}
-              </View>
-              <View style={{
-                backgroundColor: report.adherenceRate >= 85 ? "#22c55e20" : report.adherenceRate >= 70 ? "#f9731620" : "#ef444420",
-                paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
-              }}>
-                <Text style={{
-                  fontWeight: "700", fontSize: 14,
-                  color: report.adherenceRate >= 85 ? "#22c55e" : report.adherenceRate >= 70 ? "#f97316" : "#ef4444",
-                }}>
-                  {report.adherenceRate}%
-                </Text>
-              </View>
-            </View>
-            <Text style={{ color: colors.muted, fontSize: 13 }} numberOfLines={2}>{report.summary}</Text>
-            <Text style={{ color: colors.primary, fontSize: 13, fontWeight: "600" }}>Detayları Gör →</Text>
-          </TouchableOpacity>
         ))}
-      </ScrollView>
-    </ScreenContainer>
-  );
+      </View>
+    </ScrollView>
+  </ScreenContainer>);
 }
