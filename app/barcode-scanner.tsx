@@ -1,524 +1,222 @@
-import { useState, useEffect, useRef } from "react";
-import { ScrollView, Text, View, TouchableOpacity, Alert, ActivityIndicator } from "react-native";
+import { Text, View, TouchableOpacity, Alert, ScrollView, TextInput } from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
-import { useRouter } from "expo-router";
+import { BackButton } from "@/components/back-button";
 import { useColors } from "@/hooks/use-colors";
+import { useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { barcodeScannerService, type FoodItem } from "@/lib/_core/barcode-scanner";
+const MEALS_KEY = "meals_v3";
 
-interface ScannedItem {
-  id: string;
-  foodItem: FoodItem;
-  quantity: number;
-  timestamp: number;
+interface FoodResult {
+  name: string;
+  brand: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  serving: string;
+  barcode: string;
 }
 
-export default function BarcodeScannerScreen() {
-  const router = useRouter();
-  const colors = useColors();
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [scanned, setScanned] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
-  const [scannedItems, setScannedItems] = useState<ScannedItem[]>([]);
-  const [manualBarcode, setManualBarcode] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const barcodeInputRef = useRef<any>(null);
+// Open Food Facts API'den ürün çek
+async function fetchProductByBarcode(barcode: string): Promise<FoodResult | null> {
+  try {
+    const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
+    const data = await response.json();
+    if (data.status !== 1 || !data.product) return null;
+    const p = data.product;
+    const n = p.nutriments || {};
+    return {
+      name: p.product_name || p.product_name_tr || "Bilinmeyen Ürün",
+      brand: p.brands || "",
+      calories: Math.round(n["energy-kcal_100g"] || n["energy-kcal"] || 0),
+      protein: Math.round((n.proteins_100g || 0) * 10) / 10,
+      carbs: Math.round((n.carbohydrates_100g || 0) * 10) / 10,
+      fat: Math.round((n.fat_100g || 0) * 10) / 10,
+      serving: p.serving_size || "100g",
+      barcode,
+    };
+  } catch {
+    return null;
+  }
+}
 
-  useEffect(() => {
-    const getPermission = async () => {
-      const hasPermission = await barcodeScannerService.checkCameraPermission();
-      if (!hasPermission) {
-        const permission = await barcodeScannerService.requestCameraPermission();
-        setHasPermission(permission);
-      } else {
-        setHasPermission(true);
+// Demo ürünler (barkod yokken test için)
+const DEMO_PRODUCTS: Record<string, FoodResult> = {
+  "8690637094100": { name: "Ülker Çikolatalı Gofret", brand: "Ülker", calories: 498, protein: 6.2, carbs: 61.4, fat: 25.3, serving: "36g", barcode: "8690637094100" },
+  "8690526430605": { name: "Pınar Süt", brand: "Pınar", calories: 64, protein: 3.2, carbs: 4.8, fat: 3.5, serving: "200ml", barcode: "8690526430605" },
+  "8690504011064": { name: "Eti Tutku Bisküvi", brand: "Eti", calories: 467, protein: 7.8, carbs: 67.2, fat: 18.5, serving: "75g", barcode: "8690504011064" },
+  "8690632011019": { name: "Torku Yoğurt", brand: "Torku", calories: 66, protein: 3.8, carbs: 5.2, fat: 3.2, serving: "200g", barcode: "8690632011019" },
+};
+
+export default function BarcodeScannerScreen() {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const [manualBarcode, setManualBarcode] = useState("");
+  const [result, setResult] = useState<FoodResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [quantity, setQuantity] = useState("100");
+  const [mealType, setMealType] = useState("lunch");
+
+  const searchBarcode = async (barcode: string) => {
+    if (!barcode.trim()) { Alert.alert("Hata", "Barkod girin"); return; }
+    setLoading(true); setResult(null);
+    // Önce demo ürünlere bak
+    if (DEMO_PRODUCTS[barcode.trim()]) {
+      setResult(DEMO_PRODUCTS[barcode.trim()]);
+      setLoading(false); return;
+    }
+    // Open Food Facts API
+    const product = await fetchProductByBarcode(barcode.trim());
+    if (product) setResult(product);
+    else Alert.alert("Ürün Bulunamadı", "Bu barkod veritabanında yok. Manuel olarak ekleyebilirsiniz.");
+    setLoading(false);
+  };
+
+  const addToMeals = async () => {
+    if (!result) return;
+    const ratio = Number(quantity) / 100;
+    const meal = {
+      id: Date.now().toString(),
+      type: mealType,
+      description: `${result.name}${result.brand ? ` (${result.brand})` : ""} - ${quantity}g/${quantity}ml`,
+      calories: Math.round(result.calories * ratio),
+      date: new Date().toISOString().split("T")[0],
+      items: [result.name],
+      macros: {
+        protein: Math.round(result.protein * ratio * 10) / 10,
+        carbs: Math.round(result.carbs * ratio * 10) / 10,
+        fat: Math.round(result.fat * ratio * 10) / 10,
       }
     };
-
-    getPermission();
-  }, []);
-
-  const handleBarCodeScanned = async ({ type, data }: any) => {
-    setScanned(true);
-    setIsProcessing(true);
-
-    try {
-      if (!barcodeScannerService.validateBarcode(data)) {
-        Alert.alert("Hata", "Geçersiz barkod formatı");
-        setIsProcessing(false);
-        return;
-      }
-
-      const foodItem = await barcodeScannerService.scanBarcode(data);
-
-      if (foodItem) {
-        const newItem: ScannedItem = {
-          id: `${Date.now()}-${Math.random()}`,
-          foodItem,
-          quantity: 1,
-          timestamp: Date.now(),
-        };
-
-        setScannedItems([...scannedItems, newItem]);
-        Alert.alert("Başarılı", `${foodItem.name} eklendi`);
-      } else {
-        Alert.alert("Uyarı", "Ürün veritabanında bulunamadı. Manuel olarak ekleyebilirsiniz.");
-      }
-    } catch (error) {
-      Alert.alert("Hata", "Barkod tarama sırasında bir hata oluştu");
-      console.error(error);
-    } finally {
-      setIsProcessing(false);
-      setTimeout(() => setScanned(false), 500);
-    }
+    const saved = await AsyncStorage.getItem(MEALS_KEY);
+    const all = saved ? JSON.parse(saved) : [];
+    await AsyncStorage.setItem(MEALS_KEY, JSON.stringify([...all, meal]));
+    Alert.alert("✅ Eklendi!", `${result.name} öğünlerinize eklendi.\n🔥 ${meal.calories} kcal`);
+    setResult(null); setManualBarcode(""); setQuantity("100");
   };
 
-  const handleManualBarcode = async () => {
-    if (!manualBarcode.trim()) {
-      Alert.alert("Uyarı", "Lütfen barkod girin");
-      return;
-    }
+  const MEAL_TYPES = [
+    { k: "breakfast", l: "🌅 Kahvaltı" },
+    { k: "lunch", l: "☀️ Öğle" },
+    { k: "dinner", l: "🌙 Akşam" },
+    { k: "snack", l: "🍎 Ara" },
+  ];
 
-    setIsProcessing(true);
-
-    try {
-      if (!barcodeScannerService.validateBarcode(manualBarcode)) {
-        Alert.alert("Hata", "Geçersiz barkod formatı (8-14 rakam)");
-        setIsProcessing(false);
-        return;
-      }
-
-      const foodItem = await barcodeScannerService.scanBarcode(manualBarcode);
-
-      if (foodItem) {
-        const newItem: ScannedItem = {
-          id: `${Date.now()}-${Math.random()}`,
-          foodItem,
-          quantity: 1,
-          timestamp: Date.now(),
-        };
-
-        setScannedItems([...scannedItems, newItem]);
-        setManualBarcode("");
-        Alert.alert("Başarılı", `${foodItem.name} eklendi`);
-      } else {
-        Alert.alert("Uyarı", "Ürün veritabanında bulunamadı");
-      }
-    } catch (error) {
-      Alert.alert("Hata", "Barkod işleme sırasında bir hata oluştu");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleRemoveItem = (id: string) => {
-    setScannedItems(scannedItems.filter((item) => item.id !== id));
-  };
-
-  const handleUpdateQuantity = (id: string, quantity: number) => {
-    if (quantity <= 0) {
-      handleRemoveItem(id);
-      return;
-    }
-
-    setScannedItems(
-      scannedItems.map((item) =>
-        item.id === id ? { ...item, quantity } : item
-      )
-    );
-  };
-
-  const handleAddToMeal = async () => {
-    if (scannedItems.length === 0) {
-      Alert.alert("Uyarı", "Lütfen en az bir ürün ekleyin");
-      return;
-    }
-
-    try {
-      // Gerçek uygulamada, bu verileri meal'a ekleyecek
-      const mealData = {
-        items: scannedItems.map((item) => ({
-          foodName: item.foodItem.name,
-          quantity: item.foodItem.servingSize,
-          multiplier: item.quantity,
-          calories: item.foodItem.calories * item.quantity,
-          protein: item.foodItem.protein * item.quantity,
-          carbs: item.foodItem.carbs * item.quantity,
-          fat: item.foodItem.fat * item.quantity,
-          barcode: item.foodItem.barcode,
-        })),
-        timestamp: Date.now(),
-      };
-
-      console.log("Öğüne eklenen ürünler:", mealData);
-
-      Alert.alert("Başarılı", "Ürünler öğüne eklendi", [
-        {
-          text: "Tamam",
-          onPress: () => {
-            setScannedItems([]);
-            router.push("/food-management");
-          },
-        },
-      ]);
-    } catch (error) {
-      Alert.alert("Hata", "Ürünler eklenirken bir hata oluştu");
-    }
-  };
-
-  const totalCalories = scannedItems.reduce(
-    (sum, item) => sum + item.foodItem.calories * item.quantity,
-    0
-  );
-
-  const totalProtein = scannedItems.reduce(
-    (sum, item) => sum + item.foodItem.protein * item.quantity,
-    0
-  );
-
-  if (hasPermission === null) {
-    return (
-      <ScreenContainer className="items-center justify-center">
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text className="mt-4 text-foreground">İzin kontrol ediliyor...</Text>
-      </ScreenContainer>
-    );
-  }
-
-  if (hasPermission === false) {
-    return (
-      <ScreenContainer className="p-6 items-center justify-center">
-        <Text className="text-xl font-bold text-foreground mb-4">
-          Kamera İzni Gerekli
-        </Text>
-        <Text className="text-center text-muted mb-6">
-          Barkod taraması için kamera izni gereklidir. Lütfen ayarlardan izin verin.
-        </Text>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={{
-            paddingVertical: 12,
-            paddingHorizontal: 24,
-            borderRadius: 8,
-            backgroundColor: colors.primary,
-          }}
-        >
-          <Text style={{ color: "#ffffff", fontWeight: "600" }}>Geri Dön</Text>
-        </TouchableOpacity>
-      </ScreenContainer>
-    );
-  }
+  const ratio = Number(quantity) / 100;
 
   return (
-    <ScreenContainer className="p-6">
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        <View className="gap-4">
-          {/* Header */}
-          <View className="flex-row items-center justify-between mb-4">
-            <Text className="text-3xl font-bold text-foreground flex-1">📱 Barkod Tarayıcı</Text>
-            <TouchableOpacity
-              onPress={() => router.back()}
-              style={{
-                paddingVertical: 8,
-                paddingHorizontal: 12,
-                borderRadius: 6,
-                backgroundColor: colors.surface,
-                borderWidth: 1,
-                borderColor: colors.border,
-              }}
-            >
-              <Text style={{ color: colors.foreground, fontWeight: "600" }}>← Geri</Text>
+    <ScreenContainer>
+      <BackButton title="🔍 Barkod Tarayıcı" />
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: Math.max(insets.bottom + 24, 32) }}>
+
+        {/* Kamera tarayıcı (Store sürümü) */}
+        <View style={{ backgroundColor: colors.surface, borderRadius: 14, padding: 20, borderWidth: 1, borderColor: colors.border, alignItems: "center", gap: 12 }}>
+          <View style={{ width: 200, height: 140, backgroundColor: colors.border + "40", borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: colors.primary, borderStyle: "dashed" }}>
+            <Text style={{ fontSize: 48 }}>📷</Text>
+            <Text style={{ color: colors.muted, fontSize: 12, marginTop: 8, textAlign: "center" }}>Kamera ile tarama{"\n"}Store sürümünde aktif</Text>
+          </View>
+          <TouchableOpacity onPress={() => Alert.alert("Kamera", "Store sürümünde gerçek barkod taraması aktif olacak. Şimdilik manuel giriş kullanın.")}
+            style={{ paddingVertical: 12, paddingHorizontal: 24, borderRadius: 20, backgroundColor: colors.primary }}>
+            <Text style={{ color: "#fff", fontWeight: "700" }}>📷 Kamera ile Tara</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Manuel barkod girişi */}
+        <View style={{ backgroundColor: colors.surface, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: colors.border, gap: 12 }}>
+          <Text style={{ fontWeight: "700", color: colors.foreground, fontSize: 16 }}>⌨️ Manuel Barkod Gir</Text>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <TextInput value={manualBarcode} onChangeText={setManualBarcode}
+              placeholder="8690637094100" keyboardType="numeric" placeholderTextColor={colors.muted}
+              style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, color: colors.foreground, backgroundColor: colors.background, fontSize: 15 }} />
+            <TouchableOpacity onPress={() => searchBarcode(manualBarcode)} disabled={loading}
+              style={{ paddingHorizontal: 16, borderRadius: 10, backgroundColor: loading ? colors.border : colors.primary, justifyContent: "center" }}>
+              <Text style={{ color: "#fff", fontWeight: "700" }}>{loading ? "..." : "Ara"}</Text>
             </TouchableOpacity>
           </View>
 
-          <Text className="text-sm text-muted mb-4">
-            Gıda ürünlerinin barkodlarını tarayın veya manuel olarak girin.
-          </Text>
-
-          {/* Scanner Camera Placeholder */}
-          <View
-            style={{
-              backgroundColor: colors.surface,
-              borderRadius: 12,
-              padding: 40,
-              alignItems: "center",
-              justifyContent: "center",
-              height: 200,
-              borderWidth: 2,
-              borderStyle: "dashed",
-              borderColor: colors.border,
-            }}
-          >
-            <Text style={{ fontSize: 48, marginBottom: 8 }}>📷</Text>
-            <Text
-              style={{
-                color: colors.foreground,
-                fontWeight: "600",
-                textAlign: "center",
-              }}
-            >
-              Kamera Bölgesi
-            </Text>
-            <Text
-              style={{
-                color: colors.muted,
-                fontSize: 12,
-                textAlign: "center",
-                marginTop: 8,
-              }}
-            >
-              Gerçek uygulamada burada kamera akışı görünecektir
-            </Text>
-          </View>
-
-          {/* Manual Barcode Input */}
-          <View className="gap-2">
-            <Text style={{ color: colors.foreground, fontWeight: "600" }}>
-              Manuel Barkod Girişi
-            </Text>
-            <View className="flex-row gap-2">
-              <View
-                style={{
-                  flex: 1,
-                  borderRadius: 8,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                  paddingHorizontal: 12,
-                  paddingVertical: 10,
-                  backgroundColor: colors.surface,
-                }}
-              >
-                <Text
-                  style={{
-                    color: colors.foreground,
-                    fontSize: 14,
-                  }}
-                >
-                  {manualBarcode || "Barkod girin..."}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={handleManualBarcode}
-                disabled={isProcessing}
-                style={{
-                  paddingVertical: 10,
-                  paddingHorizontal: 16,
-                  borderRadius: 8,
-                  backgroundColor: colors.primary,
-                  opacity: isProcessing ? 0.6 : 1,
-                }}
-              >
-                {isProcessing ? (
-                  <ActivityIndicator color="#ffffff" size="small" />
-                ) : (
-                  <Text style={{ color: "#ffffff", fontWeight: "600" }}>Ekle</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Scanned Items */}
-          {scannedItems.length > 0 && (
-            <View className="gap-3">
-              <View className="flex-row items-center justify-between">
-                <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 16 }}>
-                  Taranmış Ürünler ({scannedItems.length})
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setScannedItems([])}
-                  style={{
-                    paddingHorizontal: 8,
-                    paddingVertical: 4,
-                    borderRadius: 6,
-                    backgroundColor: colors.error + "20",
-                  }}
-                >
-                  <Text style={{ color: colors.error, fontSize: 12, fontWeight: "600" }}>
-                    Temizle
-                  </Text>
+          {/* Demo barkodlar */}
+          <Text style={{ color: colors.muted, fontSize: 12 }}>Test için demo barkodlar:</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {Object.entries(DEMO_PRODUCTS).map(([code, p]) => (
+                <TouchableOpacity key={code} onPress={() => { setManualBarcode(code); searchBarcode(code); }}
+                  style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+                  <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600" }}>{p.name.split(" ").slice(0, 2).join(" ")}</Text>
+                  <Text style={{ color: colors.muted, fontSize: 10 }}>{code}</Text>
                 </TouchableOpacity>
-              </View>
-
-              {scannedItems.map((item) => (
-                <View
-                  key={item.id}
-                  style={{
-                    backgroundColor: colors.surface,
-                    borderRadius: 10,
-                    padding: 12,
-                    borderLeftWidth: 4,
-                    borderLeftColor: colors.primary,
-                  }}
-                >
-                  <View className="flex-row items-start justify-between mb-2">
-                    <View className="flex-1">
-                      <Text
-                        style={{
-                          fontSize: 14,
-                          fontWeight: "600",
-                          color: colors.foreground,
-                        }}
-                      >
-                        {item.foodItem.name}
-                      </Text>
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          color: colors.muted,
-                          marginTop: 2,
-                        }}
-                      >
-                        {item.foodItem.servingSize} • {item.foodItem.brand}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => handleRemoveItem(item.id)}
-                      style={{
-                        paddingHorizontal: 8,
-                        paddingVertical: 4,
-                      }}
-                    >
-                      <Text style={{ color: colors.error, fontSize: 16 }}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <View className="flex-row items-center justify-between">
-                    <View className="flex-row items-center gap-2">
-                      <TouchableOpacity
-                        onPress={() =>
-                          handleUpdateQuantity(item.id, item.quantity - 1)
-                        }
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 6,
-                          backgroundColor: colors.border,
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Text style={{ color: colors.foreground, fontWeight: "600" }}>−</Text>
-                      </TouchableOpacity>
-
-                      <Text
-                        style={{
-                          minWidth: 30,
-                          textAlign: "center",
-                          color: colors.foreground,
-                          fontWeight: "600",
-                        }}
-                      >
-                        {item.quantity}
-                      </Text>
-
-                      <TouchableOpacity
-                        onPress={() =>
-                          handleUpdateQuantity(item.id, item.quantity + 1)
-                        }
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 6,
-                          backgroundColor: colors.border,
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Text style={{ color: colors.foreground, fontWeight: "600" }}>+</Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    <Text
-                      style={{
-                        color: colors.primary,
-                        fontWeight: "600",
-                        fontSize: 14,
-                      }}
-                    >
-                      {(item.foodItem.calories * item.quantity).toFixed(0)} kcal
-                    </Text>
-                  </View>
-                </View>
               ))}
-
-              {/* Summary */}
-              <View
-                style={{
-                  backgroundColor: colors.primary + "15",
-                  borderRadius: 10,
-                  padding: 12,
-                  borderWidth: 1,
-                  borderColor: colors.primary + "30",
-                }}
-              >
-                <View className="flex-row items-center justify-between mb-2">
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>Toplam Kalori</Text>
-                  <Text
-                    style={{
-                      color: colors.primary,
-                      fontWeight: "700",
-                      fontSize: 16,
-                    }}
-                  >
-                    {totalCalories.toFixed(0)} kcal
-                  </Text>
-                </View>
-                <View className="flex-row items-center justify-between">
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>Toplam Protein</Text>
-                  <Text
-                    style={{
-                      color: colors.primary,
-                      fontWeight: "700",
-                      fontSize: 16,
-                    }}
-                  >
-                    {totalProtein.toFixed(1)}g
-                  </Text>
-                </View>
-              </View>
-
-              {/* Add to Meal Button */}
-              <TouchableOpacity
-                onPress={handleAddToMeal}
-                style={{
-                  paddingVertical: 14,
-                  paddingHorizontal: 16,
-                  borderRadius: 8,
-                  backgroundColor: colors.primary,
-                }}
-              >
-                <Text
-                  style={{
-                    color: "#ffffff",
-                    fontWeight: "600",
-                    textAlign: "center",
-                    fontSize: 16,
-                  }}
-                >
-                  Öğüne Ekle
-                </Text>
-              </TouchableOpacity>
             </View>
-          )}
-
-          {/* Info */}
-          <View
-            style={{
-              backgroundColor: colors.surface,
-              borderRadius: 10,
-              padding: 12,
-              borderLeftWidth: 4,
-              borderLeftColor: colors.warning,
-            }}
-          >
-            <Text style={{ color: colors.foreground, fontWeight: "600", marginBottom: 4 }}>
-              💡 İpucu
-            </Text>
-            <Text style={{ color: colors.muted, fontSize: 12 }}>
-              Gıda ürünlerinin barkodlarını tarayarak hızlı bir şekilde öğün kaydedebilirsiniz. Veritabanında olmayan ürünleri manuel olarak ekleyebilirsiniz.
-            </Text>
-          </View>
+          </ScrollView>
         </View>
+
+        {/* Sonuç */}
+        {result && (
+          <View style={{ backgroundColor: "#22c55e20", borderRadius: 14, padding: 16, borderWidth: 2, borderColor: "#22c55e", gap: 14 }}>
+            <View>
+              <Text style={{ fontSize: 18, fontWeight: "700", color: colors.foreground }}>{result.name}</Text>
+              {result.brand ? <Text style={{ color: colors.muted, fontSize: 13 }}>{result.brand}</Text> : null}
+              <Text style={{ color: colors.muted, fontSize: 11 }}>Barkod: {result.barcode}</Text>
+            </View>
+
+            {/* Besin değerleri (100g için) */}
+            <View style={{ backgroundColor: colors.surface, borderRadius: 10, padding: 12, gap: 8 }}>
+              <Text style={{ fontWeight: "600", color: colors.foreground, fontSize: 13 }}>📊 100g için besin değerleri:</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {[
+                  { icon: "🔥", label: "Kalori", value: `${result.calories} kcal`, color: "#f97316" },
+                  { icon: "🥩", label: "Protein", value: `${result.protein}g`, color: "#ef4444" },
+                  { icon: "🍞", label: "Karb.", value: `${result.carbs}g`, color: "#f59e0b" },
+                  { icon: "🫒", label: "Yağ", value: `${result.fat}g`, color: "#8b5cf6" },
+                ].map(item => (
+                  <View key={item.label} style={{ flex: 1, minWidth: "45%", backgroundColor: item.color + "15", borderRadius: 8, padding: 8, borderWidth: 1, borderColor: item.color + "30" }}>
+                    <Text style={{ fontSize: 16 }}>{item.icon}</Text>
+                    <Text style={{ fontWeight: "700", color: item.color, fontSize: 14 }}>{item.value}</Text>
+                    <Text style={{ fontSize: 10, color: colors.muted }}>{item.label}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* Miktar */}
+            <View style={{ gap: 6 }}>
+              <Text style={{ fontWeight: "600", color: colors.foreground }}>Miktar (g/ml)</Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {["50", "100", "150", "200"].map(q => (
+                  <TouchableOpacity key={q} onPress={() => setQuantity(q)}
+                    style={{ flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: "center", backgroundColor: quantity === q ? colors.primary : colors.surface, borderWidth: 1, borderColor: quantity === q ? colors.primary : colors.border }}>
+                    <Text style={{ color: quantity === q ? "#fff" : colors.foreground, fontWeight: "600" }}>{q}g</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TextInput value={quantity} onChangeText={setQuantity} keyboardType="numeric" placeholderTextColor={colors.muted}
+                style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.foreground, backgroundColor: colors.background, textAlign: "center", fontSize: 16, fontWeight: "700" }} />
+            </View>
+
+            {/* Hesaplanan değer */}
+            <View style={{ backgroundColor: colors.primary + "20", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: colors.primary }}>
+              <Text style={{ color: colors.primary, fontWeight: "700", textAlign: "center", fontSize: 15 }}>
+                {quantity}g için: 🔥 {Math.round(result.calories * ratio)} kcal · 🥩 {(result.protein * ratio).toFixed(1)}g · 🍞 {(result.carbs * ratio).toFixed(1)}g · 🫒 {(result.fat * ratio).toFixed(1)}g
+              </Text>
+            </View>
+
+            {/* Öğün tipi */}
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {MEAL_TYPES.map(t => (
+                <TouchableOpacity key={t.k} onPress={() => setMealType(t.k)}
+                  style={{ flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: "center", backgroundColor: mealType === t.k ? colors.primary : colors.surface, borderWidth: 1, borderColor: mealType === t.k ? colors.primary : colors.border }}>
+                  <Text style={{ color: mealType === t.k ? "#fff" : colors.foreground, fontSize: 11, fontWeight: "600" }}>{t.l}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity onPress={addToMeals}
+              style={{ paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: "#22c55e" }}>
+              <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>✅ Öğünlere Ekle</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
     </ScreenContainer>
   );
